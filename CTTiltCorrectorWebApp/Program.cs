@@ -1,0 +1,94 @@
+using CTTiltCorrector.Data;
+using CTTiltCorrector.Services;
+using CTTiltCorrector.Infrastructure;
+using Microsoft.AspNetCore.Authentication.Negotiate;
+using Microsoft.EntityFrameworkCore;
+using MudBlazor.Services;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// ─── MudBlazor ───────────────────────────────────────────────────────────────
+builder.Services.AddMudServices();
+
+// ─── Blazor Server ───────────────────────────────────────────────────────────
+builder.Services.AddRazorPages();
+builder.Services.AddServerSideBlazor();
+
+// ─── Windows / Active Directory Authentication ───────────────────────────────
+builder.Services.AddAuthentication(NegotiateDefaults.AuthenticationScheme)
+    .AddNegotiate();
+
+builder.Services.AddAuthorization(options =>
+{
+    // All pages require the AD group defined in appsettings.json
+    options.FallbackPolicy = options.DefaultPolicy;
+});
+
+// ─── Configuration ───────────────────────────────────────────────────────────
+builder.Services.Configure<DicomConfig>(
+    builder.Configuration.GetSection(DicomConfig.SectionName));
+
+builder.Services.Configure<AppConfig>(
+    builder.Configuration.GetSection(AppConfig.SectionName));
+
+// ─── SQLite / EF Core ────────────────────────────────────────────────────────
+var dbPath = builder.Configuration["App:DatabasePath"] ?? "data/cttiltcorrector.db";
+Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(dbPath))!);
+
+builder.Services.AddDbContextFactory<AppDbContext>(options =>
+    options.UseSqlite($"Data Source={dbPath}"));
+
+// ─── Background Processing Queue (single-threaded via Channel) ───────────────
+builder.Services.AddSingleton<CorrectionJobQueue>();
+builder.Services.AddHostedService<CorrectionJobProcessor>();
+
+// ─── In-memory DICOM slice store (shared between SCP listener and pipeline) ───
+// Single instance holds all in-flight datasets; no disk I/O.
+builder.Services.AddSingleton<InMemoryDicomStore>();
+
+// ─── DICOM C-STORE SCP Listener (HostedService) ──────────────────────────────
+builder.Services.AddHostedService<DicomStoreScp>();
+
+// ─── Tilt corrector — swap YourTiltCorrector for your concrete implementation ─
+// Your class must implement ITiltCorrector:
+//   Task<List<DicomDataset>> CorrectAsync(List<DicomDataset>, IProgress<string>, CancellationToken)
+builder.Services.AddScoped<ITiltCorrector, CTTiltCorrector.YourTiltCorrector>();
+
+// ─── Application Services ────────────────────────────────────────────────────
+builder.Services.AddScoped<DicomQueryService>();
+builder.Services.AddScoped<CorrectionService>();
+builder.Services.AddScoped<HistoryService>();
+builder.Services.AddSingleton<MonitorState>();
+
+// ─── HttpContextAccessor (for resolving current Windows user in Blazor) ───────
+builder.Services.AddHttpContextAccessor();
+
+var app = builder.Build();
+
+// ─── Auto-create database schema on startup ───────────────────────────────────
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    // EnsureCreated creates the schema from the model if the DB doesn't exist.
+    // When you're ready for production, switch to db.Database.Migrate() and
+    // generate migrations with: dotnet ef migrations add InitialCreate
+    db.Database.EnsureCreated();
+}
+
+
+if (!app.Environment.IsDevelopment())
+{
+    app.UseExceptionHandler("/Error");
+}
+
+app.UseStaticFiles();
+app.UseRouting();
+
+app.UseAuthentication();
+app.UseAuthorization();
+
+app.MapBlazorHub();
+app.MapFallbackToPage("/_Host");
+app.MapGet("/", () => Results.Redirect("/search"));
+
+app.Run();

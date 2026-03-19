@@ -1,0 +1,169 @@
+@page "/search"
+@inject DicomQueryService DicomQuery
+@inject CorrectionJobQueue JobQueue
+@inject IHttpContextAccessor HttpContextAccessor
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+
+<PageTitle>Search — CT Tilt Corrector</PageTitle>
+
+<MudText Typo="Typo.h5" Class="mb-4">
+    <MudIcon Icon="@Icons.Material.Filled.Search" Class="mr-2" />
+    Patient Series Search
+</MudText>
+
+<MudPaper Class="pa-4 mb-4" Elevation="2">
+    <MudGrid AlignItems="Center">
+        <MudItem xs="12" md="5">
+            <MudTextField @bind-Value="_patientId"
+                          Label="Patient ID (MRN)"
+                          Variant="Variant.Outlined"
+                          Adornment="Adornment.Start"
+                          AdornmentIcon="@Icons.Material.Filled.Person"
+                          Immediate="true"
+                          OnKeyDown="@OnKeyDown" />
+        </MudItem>
+        <MudItem xs="12" md="3">
+            <MudButton Variant="Variant.Filled"
+                       Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.Search"
+                       OnClick="SearchAsync"
+                       Disabled="_searching"
+                       FullWidth="true">
+                @if (_searching) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+                Search ARIA
+            </MudButton>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@if (_errorMessage is not null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">@_errorMessage</MudAlert>
+}
+
+@if (_results is not null)
+{
+    <MudText Typo="Typo.subtitle1" Class="mb-2">
+        Found <strong>@_results.Count</strong> CT series for patient <strong>@_patientId</strong>
+    </MudText>
+
+    <MudTable Items="_results"
+              Hover="true"
+              Striped="true"
+              Dense="true"
+              Elevation="2"
+              Loading="_searching">
+        <HeaderContent>
+            <MudTh>Series Date</MudTh>
+            <MudTh>Description</MudTh>
+            <MudTh>Modality</MudTh>
+            <MudTh Style="text-align:center">Images</MudTh>
+            <MudTh>Series UID</MudTh>
+            <MudTh Style="text-align:center">Action</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>@FormatDate(context.SeriesDate)</MudTd>
+            <MudTd>@context.SeriesDescription</MudTd>
+            <MudTd><MudChip T="string" Color="Color.Info" Size="Size.Small">@context.Modality</MudChip></MudTd>
+            <MudTd Style="text-align:center">@context.NumberOfImages</MudTd>
+            <MudTd Style="font-family:monospace; font-size:0.75rem">@TruncateUid(context.SeriesInstanceUid)</MudTd>
+            <MudTd Style="text-align:center">
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Warning"
+                           Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.Straighten"
+                           OnClick="() => SubmitJobAsync(context)"
+                           Disabled="_submitting">
+                    Correct Tilt
+                </MudButton>
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText>No CT series found for this patient ID.</MudText>
+        </NoRecordsContent>
+    </MudTable>
+}
+
+@code {
+    private string _patientId = string.Empty;
+    private bool _searching;
+    private bool _submitting;
+    private string? _errorMessage;
+    private List<DicomSeriesResult>? _results;
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await SearchAsync();
+    }
+
+    private async Task SearchAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_patientId)) return;
+        _errorMessage = null;
+        _results = null;
+        _searching = true;
+        try
+        {
+            var res = await DicomQuery.FindSeriesAsync(_patientId.Trim());
+            _results = res.ToList();
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Query failed: {ex.Message}";
+        }
+        finally
+        {
+            _searching = false;
+        }
+    }
+
+    private async Task SubmitJobAsync(DicomSeriesResult series)
+    {
+        _submitting = true;
+        try
+        {
+            var user = HttpContextAccessor.HttpContext?.User?.Identity?.Name ?? "Unknown";
+
+            // Create a progress sink that streams messages to the Monitor page
+            // via a shared singleton (MonitorState injected from DI).
+            var progress = new Progress<string>(_ => { }); // wired in Monitor page
+
+            var job = new CorrectionJob(
+                series.PatientId,
+                series.StudyInstanceUid,
+                series.SeriesInstanceUid,
+                user);
+
+            await JobQueue.TryEnqueueAsync(job, progress);
+
+            Snackbar.Add(
+                $"Job queued for series {TruncateUid(series.SeriesInstanceUid)}. " +
+                "View progress on the Monitor page.",
+                Severity.Success);
+
+            Nav.NavigateTo("/monitor");
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Failed to queue job: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _submitting = false;
+        }
+    }
+
+    private static string FormatDate(string raw)
+    {
+        if (raw.Length == 8 &&
+            DateTime.TryParseExact(raw, "yyyyMMdd",
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var dt))
+            return dt.ToString("dd MMM yyyy");
+        return raw;
+    }
+
+    private static string TruncateUid(string uid)
+        => uid.Length > 20 ? "…" + uid[^20..] : uid;
+}

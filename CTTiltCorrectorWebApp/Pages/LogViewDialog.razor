@@ -1,0 +1,20 @@
+<MudDialog>
+    <DialogContent>
+        <MudPaper Style="background:#0d1117; padding:16px; max-height:60vh; overflow-y:auto; border-radius:6px;">
+            <pre style="color:#c9d1d9; font-family:'Cascadia Code','Fira Code',monospace;
+                        font-size:0.78rem; margin:0; white-space:pre-wrap; word-break:break-all;">@LogText</pre>
+        </MudPaper>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close" Color="Color.Primary" Variant="Variant.Filled">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public int RunId { get; set; }
+    [Parameter] public string Patient { get; set; } = string.Empty;
+    [Parameter] public string LogText { get; set; } = string.Empty;
+
+    void Close() => MudDialog.Close(DialogResult.Ok(true));
+}

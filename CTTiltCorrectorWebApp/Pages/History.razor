@@ -1,0 +1,130 @@
+@page "/history"
+@inject HistoryService HistorySvc
+@inject IDialogService Dialog
+
+<PageTitle>History — CT Tilt Corrector</PageTitle>
+
+<MudText Typo="Typo.h5" Class="mb-4">
+    <MudIcon Icon="@Icons.Material.Filled.History" Class="mr-2" />
+    Correction History
+</MudText>
+
+<!-- Search bar -->
+<MudPaper Class="pa-4 mb-4" Elevation="2">
+    <MudGrid AlignItems="Center">
+        <MudItem xs="12" md="5">
+            <MudTextField @bind-Value="_filterPatientId"
+                          Label="Filter by Patient ID"
+                          Variant="Variant.Outlined"
+                          Adornment="Adornment.Start"
+                          AdornmentIcon="@Icons.Material.Filled.FilterAlt"
+                          Immediate="false"
+                          DebounceInterval="400"
+                          OnDebounceIntervalElapsed="LoadAsync" />
+        </MudItem>
+        <MudItem xs="12" md="2">
+            <MudButton Variant="Variant.Outlined"
+                       StartIcon="@Icons.Material.Filled.Refresh"
+                       OnClick="LoadAsync"
+                       FullWidth="true">
+                Refresh
+            </MudButton>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+<MudTable Items="_runs"
+          Hover="true"
+          Striped="true"
+          Dense="true"
+          Elevation="2"
+          Loading="_loading"
+          CurrentPage="_page"
+          RowsPerPage="_pageSize">
+    <HeaderContent>
+        <MudTh><MudTableSortLabel SortBy="new Func<CorrectionRun,object>(r=>r.PatientId)">Patient ID</MudTableSortLabel></MudTh>
+        <MudTh><MudTableSortLabel SortBy="new Func<CorrectionRun,object>(r=>r.ExecutionDate)" InitialDirection="SortDirection.Descending">Date (UTC)</MudTableSortLabel></MudTh>
+        <MudTh>User</MudTh>
+        <MudTh>Status</MudTh>
+        <MudTh>Series UID</MudTh>
+        <MudTh Style="text-align:center">Log</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd>@context.PatientId</MudTd>
+        <MudTd>@context.ExecutionDate.ToString("dd MMM yyyy HH:mm")</MudTd>
+        <MudTd>@context.UserName</MudTd>
+        <MudTd>
+            <MudChip T="string"
+                     Color="@StatusColor(context.Status)"
+                     Size="Size.Small">@context.Status</MudChip>
+        </MudTd>
+        <MudTd Style="font-family:monospace; font-size:0.75rem">@TruncateUid(context.SeriesInstanceUid)</MudTd>
+        <MudTd Style="text-align:center">
+            <MudIconButton Icon="@Icons.Material.Filled.Article"
+                           Color="Color.Primary"
+                           Size="Size.Small"
+                           Title="View log"
+                           OnClick="() => ViewLogAsync(context)" />
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent>
+        <MudText>No correction runs found.</MudText>
+    </NoRecordsContent>
+    <PagerContent>
+        <MudTablePager />
+    </PagerContent>
+</MudTable>
+
+@code {
+    private List<CorrectionRun> _runs = new();
+    private bool _loading;
+    private string? _filterPatientId;
+    private int _page = 1;
+    private int _pageSize = 25;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            _runs = await HistorySvc.GetRunsAsync(_filterPatientId, _page, _pageSize);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task ViewLogAsync(CorrectionRun run)
+    {
+        var log = await HistorySvc.ReadLogAsync(run.Id);
+
+        var parameters = new DialogParameters
+        {
+            ["RunId"]   = run.Id,
+            ["Patient"] = run.PatientId,
+            ["LogText"] = log ?? "(Log file not found or empty.)"
+        };
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.Large,
+            FullWidth = true,
+            CloseButton = true
+        };
+        await Dialog.ShowAsync<LogViewDialog>($"Log — {run.PatientId} — {run.ExecutionDate:dd MMM yyyy HH:mm}", parameters, options);
+    }
+
+    private static Color StatusColor(string status) => status switch
+    {
+        "Completed" => Color.Success,
+        "Failed"    => Color.Error,
+        "Cancelled" => Color.Warning,
+        "Running"   => Color.Info,
+        _           => Color.Default
+    };
+
+    private static string TruncateUid(string uid)
+        => uid.Length > 24 ? "…" + uid[^24..] : uid;
+}

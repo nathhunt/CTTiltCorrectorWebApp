@@ -1,0 +1,89 @@
+@page "/monitor"
+@implements IDisposable
+@inject MonitorState MonitorState
+@inject IJSRuntime JS
+
+<PageTitle>Monitor — CT Tilt Corrector</PageTitle>
+
+<MudText Typo="Typo.h5" Class="mb-4">
+    <MudIcon Icon="@Icons.Material.Filled.Terminal" Class="mr-2" />
+    Live Processing Monitor
+</MudText>
+
+<MudPaper Class="pa-3 mb-3" Elevation="2">
+    <MudGrid AlignItems="Center">
+        <MudItem xs="12" md="8">
+            @if (MonitorState.IsRunning)
+            {
+                <MudAlert Severity="Severity.Info" Dense="true" NoIcon="false">
+                    <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                    Processing: <strong>@MonitorState.CurrentJobDescription</strong>
+                </MudAlert>
+            }
+            else if (_lines.Count > 0)
+            {
+                <MudAlert Severity="Severity.Success" Dense="true">
+                    Last job completed. Awaiting next submission.
+                </MudAlert>
+            }
+            else
+            {
+                <MudAlert Severity="Severity.Normal" Dense="true">
+                    No active job. Submit a tilt-correction from the Search page.
+                </MudAlert>
+            }
+        </MudItem>
+        <MudItem xs="12" md="4" Style="text-align:right">
+            <MudChip T="string" Icon="@Icons.Material.Filled.FormatListNumbered"
+                     Color="Color.Default" Size="Size.Small">
+                @_lines.Count lines
+            </MudChip>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+<!-- Scrolling terminal -->
+<MudPaper id="log-terminal"
+          Class="pa-3"
+          Elevation="4"
+          Style="background:#0d1117; overflow-y:auto; height:65vh; border-radius:8px;">
+    @foreach (var line in _lines)
+    {
+        <div style="@LineStyle(line)">@line</div>
+    }
+    <div id="log-end"></div>
+</MudPaper>
+
+@code {
+    private List<string> _lines = new();
+
+    protected override void OnInitialized()
+    {
+        _lines = MonitorState.Lines.ToList();
+        MonitorState.Subscribe(OnUpdate);
+    }
+
+    private void OnUpdate()
+    {
+        _lines = MonitorState.Lines.ToList();
+        InvokeAsync(async () =>
+        {
+            StateHasChanged();
+            await JS.InvokeVoidAsync("scrollToBottom", "log-end");
+        });
+    }
+
+    private static string LineStyle(string line)
+    {
+        var color = line.Contains("❌") || line.Contains("Failed") ? "#ff6b6b"
+                  : line.Contains("✅") || line.Contains("complete") ? "#51cf66"
+                  : line.Contains("⚠️") || line.Contains("Warning") ? "#fcc419"
+                  : line.Contains("📐") ? "#74c0fc"
+                  : "#c9d1d9";
+
+        return $"color:{color}; font-family:'Cascadia Code','Fira Code',monospace; " +
+               "font-size:0.8rem; line-height:1.6; white-space:pre-wrap; word-break:break-all;";
+    }
+
+    public void Dispose() => MonitorState.Unsubscribe(OnUpdate);
+}

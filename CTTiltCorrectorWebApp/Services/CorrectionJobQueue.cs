@@ -1,0 +1,103 @@
+using System.Threading.Channels;
+
+namespace CTTiltCorrector.Services;
+
+// ─── Queue ────────────────────────────────────────────────────────────────────
+
+/// <summary>
+/// Bounded single-writer, single-reader channel that serialises all
+/// tilt-correction jobs. Even if multiple users submit jobs concurrently,
+/// the processor always handles one at a time.
+/// </summary>
+public class CorrectionJobQueue
+{
+    // Capacity = 64; writers block when full (backpressure).
+    private readonly Channel<QueuedJob> _channel =
+        Channel.CreateBounded<QueuedJob>(new BoundedChannelOptions(64)
+        {
+            SingleReader = true,
+            SingleWriter = false,
+            FullMode     = BoundedChannelFullMode.Wait
+        });
+
+    public ChannelReader<QueuedJob> Reader => _channel.Reader;
+
+    /// <summary>
+    /// Enqueues a job. Awaits if the channel is full.
+    /// Returns the <see cref="IProgress{T}"/> sink the UI should subscribe to.
+    /// </summary>
+    public async Task<bool> TryEnqueueAsync(
+        CorrectionJob job,
+        IProgress<string> uiProgress,
+        CancellationToken ct = default)
+    {
+        var queued = new QueuedJob(job, uiProgress, ct);
+        await _channel.Writer.WriteAsync(queued, ct);
+        return true;
+    }
+}
+
+// ─── Job wrapper ─────────────────────────────────────────────────────────────
+
+public record QueuedJob(
+    CorrectionJob Job,
+    IProgress<string> Progress,
+    CancellationToken CancellationToken);
+
+// ─── Processor HostedService ─────────────────────────────────────────────────
+
+/// <summary>
+/// Long-running background service that drains <see cref="CorrectionJobQueue"/>
+/// one job at a time, invoking <see cref="CorrectionService"/> for each.
+/// </summary>
+public class CorrectionJobProcessor : BackgroundService
+{
+    private readonly CorrectionJobQueue _queue;
+    private readonly IServiceProvider _services;
+    private readonly ILogger<CorrectionJobProcessor> _logger;
+
+    public CorrectionJobProcessor(
+        CorrectionJobQueue queue,
+        IServiceProvider services,
+        ILogger<CorrectionJobProcessor> logger)
+    {
+        _queue    = queue;
+        _services = services;
+        _logger   = logger;
+    }
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        _logger.LogInformation("CorrectionJobProcessor started.");
+
+        await foreach (var queued in _queue.Reader.ReadAllAsync(stoppingToken))
+        {
+            _logger.LogInformation(
+                "Processing job: Patient={Patient} Series={Series} User={User}",
+                queued.Job.PatientId, queued.Job.SeriesInstanceUid, queued.Job.UserName);
+
+            // CorrectionService is Scoped — create a new scope per job.
+            await using var scope = _services.CreateAsyncScope();
+            var correctionService = scope.ServiceProvider.GetRequiredService<CorrectionService>();
+
+            try
+            {
+                await correctionService.RunAsync(
+                    queued.Job,
+                    queued.Progress,
+                    queued.CancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogWarning("Job cancelled: {Series}", queued.Job.SeriesInstanceUid);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Job failed: {Series}", queued.Job.SeriesInstanceUid);
+                queued.Progress.Report($"❌ Unhandled error: {ex.Message}");
+            }
+        }
+
+        _logger.LogInformation("CorrectionJobProcessor stopped.");
+    }
+}

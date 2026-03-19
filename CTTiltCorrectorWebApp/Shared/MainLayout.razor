@@ -1,0 +1,116 @@
+@inherits LayoutComponentBase
+
+<MudThemeProvider Theme="_theme" IsDarkMode="_isDark" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<MudLayout>
+    <!-- App Bar -->
+    <MudAppBar Elevation="2" Color="Color.Dark" Dense="false">
+        <MudIcon Icon="@Icons.Material.Filled.Adjust"
+                 Color="Color.Warning"
+                 Size="Size.Large"
+                 Class="mr-3" />
+        <MudText Typo="Typo.h6" Style="font-weight:700; letter-spacing:0.04em;">
+            CT TILT CORRECTOR
+        </MudText>
+        <MudSpacer />
+        <MudText Typo="Typo.caption" Class="mr-4" Style="opacity:0.6;">
+            <AuthorizeView>
+                <Authorized>@context.User.Identity?.Name</Authorized>
+            </AuthorizeView>
+        </MudText>
+        <MudIconButton Icon="@(_isDark ? Icons.Material.Filled.LightMode : Icons.Material.Filled.DarkMode)"
+                       Color="Color.Inherit"
+                       Title="@(_isDark ? "Switch to light mode" : "Switch to dark mode")"
+                       OnClick="ToggleDarkMode" />
+    </MudAppBar>
+
+    <!-- Side Navigation -->
+    <MudDrawer Open="true" Elevation="1" Variant="DrawerVariant.Persistent" Width="220px">
+        <MudDrawerHeader>
+            <MudText Typo="Typo.overline" Style="opacity:0.5; font-size:0.65rem; letter-spacing:0.12em;">
+                NAVIGATION
+            </MudText>
+        </MudDrawerHeader>
+        <MudNavMenu>
+            <MudNavLink Href="/search"
+                        Icon="@Icons.Material.Filled.Search"
+                        Match="NavLinkMatch.All">
+                Search
+            </MudNavLink>
+            <MudNavLink Href="/monitor"
+                        Icon="@Icons.Material.Filled.Terminal"
+                        Match="NavLinkMatch.All">
+                Monitor
+            </MudNavLink>
+            <MudNavLink Href="/history"
+                        Icon="@Icons.Material.Filled.History"
+                        Match="NavLinkMatch.All">
+                History
+            </MudNavLink>
+        </MudNavMenu>
+
+        <!-- Status indicator at bottom of drawer -->
+        <MudSpacer />
+        <MudPaper Class="ma-3 pa-2" Elevation="0" Style="background:rgba(255,255,255,0.04);">
+            <MudText Typo="Typo.caption" Style="opacity:0.5; font-size:0.65rem;">
+                DICOM SCP
+            </MudText>
+            <MudChip T="string" Color="Color.Success"
+                     Size="Size.Small"
+                     Icon="@Icons.Material.Filled.Circle"
+                     Class="mt-1">
+                Listening
+            </MudChip>
+        </MudPaper>
+    </MudDrawer>
+
+    <!-- Main content -->
+    <MudMainContent>
+        <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="pt-6 pb-6">
+            <AuthorizeView>
+                <Authorized>
+                    @Body
+                </Authorized>
+                <NotAuthorized>
+                    <MudAlert Severity="Severity.Error" Class="mt-8">
+                        <MudText Typo="Typo.h6">Access Denied</MudText>
+                        <MudText>
+                            Your account does not have access to CT Tilt Corrector.
+                            Please contact your system administrator to be added to the
+                            required Active Directory group.
+                        </MudText>
+                    </MudAlert>
+                </NotAuthorized>
+            </AuthorizeView>
+        </MudContainer>
+    </MudMainContent>
+</MudLayout>
+
+@code {
+    private bool _isDark = false;
+
+    private void ToggleDarkMode() => _isDark = !_isDark;
+
+    private MudTheme _theme = new MudTheme
+    {
+        PaletteLight = new PaletteLight
+        {
+            Primary        = "#0070f3",
+            Secondary      = "#f5a623",
+            AppbarBackground = "#0a0a0a",
+            Background     = "#f0f2f5",
+            Surface        = "#ffffff",
+            DrawerBackground = "#111418",
+            DrawerText     = "#e5e7eb",
+            DrawerIcon     = "#9ca3af",
+        },
+        PaletteDark = new PaletteDark
+        {
+            Primary   = "#3b82f6",
+            Secondary = "#f59e0b",
+        }
+    };
+}
