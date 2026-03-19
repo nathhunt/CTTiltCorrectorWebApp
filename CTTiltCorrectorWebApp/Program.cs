@@ -18,9 +18,28 @@ builder.Services.AddServerSideBlazor();
 builder.Services.AddAuthentication(NegotiateDefaults.AuthenticationScheme)
     .AddNegotiate();
 
+var allowedGroups = builder.Configuration
+    .GetSection("App:AllowedAdGroups")
+    .Get<List<string>>() ?? new List<string>();
+
 builder.Services.AddAuthorization(options =>
 {
-    // All pages require the AD group defined in appsettings.json
+    if (allowedGroups.Count > 0)
+    {
+        // User must be authenticated AND belong to at least one of the listed groups
+        options.DefaultPolicy = new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder()
+            .RequireAuthenticatedUser()
+            .RequireRole(allowedGroups.ToArray())
+            .Build();
+    }
+    else
+    {
+        // No groups configured — require authentication only (useful during development)
+        options.DefaultPolicy = new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder()
+            .RequireAuthenticatedUser()
+            .Build();
+    }
+
     options.FallbackPolicy = options.DefaultPolicy;
 });
 
