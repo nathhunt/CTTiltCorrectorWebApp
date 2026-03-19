@@ -1,115 +1,178 @@
-# CT Tilt Corrector — Setup Guide
+# CT Tilt Corrector
 
-## Prerequisites
-- .NET 8 SDK
-- Windows Server / IIS with Kerberos (for AD Auth)
-- ARIA DICOM server accessible on the local clinical network
-- fo-dicom compatible DICOM listener port (default: 11112) open in the firewall
+A Blazor Server application for querying CT series from an ARIA DICOM server, passing them through a tilt-correction algorithm entirely in memory, and returning the corrected series to ARIA. No DICOM files are written to disk at any point.
 
 ---
 
-## 1 — Clone & Configure
+## Prerequisites
 
-Edit `appsettings.json` before first run:
+- .NET 8 SDK
+- Windows machine joined to the Active Directory domain (required for Windows Authentication)
+- ARIA DICOM server accessible on the local clinical network
+- Firewall rule allowing inbound TCP on the DICOM SCP port (default: **11112**)
+
+---
+
+## 1 — Configure appsettings.json
+
+Edit `appsettings.json` before first run. The minimum required changes are the DICOM networking values and your AD groups.
 
 ```json
 {
+  "Kestrel": {
+    "Endpoints": {
+      "Http": {
+        "Url": "http://0.0.0.0:5000"
+      }
+    }
+  },
   "Dicom": {
-    "LocalAeTitle":  "CTTILTCORRECTOR",      // AE Title registered in ARIA
-    "LocalPort":     11112,                   // Port ARIA will push images to
-    "RemoteAeTitle": "ARIA_AE",               // ARIA's AE Title
-    "RemoteHost":    "192.168.1.100",         // ARIA server IP
-    "RemotePort":    104                      // ARIA DICOM port
+    "LocalAeTitle": "CTTILTCORRECTOR",
+    "LocalPort": 11112,
+    "RemoteAeTitle": "ARIA_AE",
+    "RemoteHost": "192.168.1.100",
+    "RemotePort": 104,
+    "MoveDestinationAeTitle": "CTTILTCORRECTOR",
+    "ConnectionTimeoutSeconds": 30
   },
   "App": {
-    "RequiredAdGroup": "DOMAIN\\CT-TiltCorrector-Users"
+    "DatabasePath": "data/cttiltcorrector.db",
+    "LogRootPath": "logs/corrections",
+    "AllowedAdGroups": [
+      "DOMAIN\\CT-TiltCorrector-Users"
+    ]
   }
 }
 ```
 
+| Setting | Description |
+|---|---|
+| `Kestrel:Endpoints:Http:Url` | Address and port Kestrel listens on. HTTP only — internal network. |
+| `Dicom:LocalAeTitle` | AE Title of this application. Must match what is registered in ARIA. |
+| `Dicom:LocalPort` | Port ARIA pushes incoming images to (C-STORE SCP). |
+| `Dicom:RemoteAeTitle` | ARIA's AE Title. |
+| `Dicom:RemoteHost` | ARIA server IP or hostname. |
+| `Dicom:RemotePort` | ARIA DICOM port (typically 104). |
+| `Dicom:MoveDestinationAeTitle` | AE Title ARIA sends the C-MOVE response to. Usually the same as `LocalAeTitle`. |
+| `App:DatabasePath` | Path to the SQLite database file. Created automatically on first run. |
+| `App:LogRootPath` | Root directory for per-run log files. |
+| `App:AllowedAdGroups` | AD groups allowed to access the app. User must be in at least one. Leave empty to allow any authenticated domain user (useful for testing). |
+
 ---
 
-## 2 — Database Migration
+## 2 — ARIA DICOM Node Registration
 
-```bash
-# From the project root:
-dotnet ef migrations add InitialCreate
-dotnet ef database update
+Register this application as a DICOM node in ARIA before first use:
+
+| Field | Value |
+|---|---|
+| AE Title | Value of `Dicom:LocalAeTitle` |
+| IP Address | IP of the server running this application |
+| Port | Value of `Dicom:LocalPort` |
+
+---
+
+## 3 — Plug In Your Tilt Corrector
+
+Open `YourTiltCorrector.cs` and implement the `CorrectAsync` method:
+
+```csharp
+public Task<List<DicomDataset>> CorrectAsync(
+    List<DicomDataset> slices,       // all slices, sorted by Instance Number
+    IProgress<string> progress,      // report status to the Monitor UI
+    CancellationToken ct)
+{
+    // your algorithm here
+    // return the corrected datasets — UIDs and pixel data are your responsibility
+}
 ```
 
-Or migrations are applied automatically on startup via `db.Database.Migrate()` in `Program.cs`.
+The framework handles everything else: receiving slices from ARIA into memory, calling your function, and sending the returned datasets back to ARIA.
 
 ---
 
-## 3 — Run (Development)
+## 4 — Database
 
+The SQLite database is created automatically on first startup — no manual steps required. One record is written per correction run containing the Patient ID, Series Instance UID, timestamp, username, job status, and a path to the run log file.
+
+---
+
+## 5 — Running
+
+**Development:**
 ```bash
 dotnet run
 ```
+Navigate to `http://localhost:5000`.
 
----
-
-## 4 — Publish (IIS / Windows Service)
-
+**Production (Windows Service):**
 ```bash
 dotnet publish -c Release -o ./publish
-
-# IIS: Point application pool to ./publish
-# Enable Windows Authentication in IIS, disable Anonymous Auth
-# Ensure app pool identity has write access to:
-#   data/          (SQLite database)
-#   logs/          (run logs + DICOM staging)
+sc create CTTiltCorrector binPath="dotnet C:\path\to\publish\CTTiltCorrector.dll" start=auto
+sc start CTTiltCorrector
 ```
 
----
-
-## 5 — ARIA DICOM Configuration
-
-Register the application as a DICOM node in the ARIA system:
-- AE Title : value of `Dicom:LocalAeTitle`
-- IP       : server IP running this application
-- Port     : value of `Dicom:LocalPort`
+Ensure the service account has write access to the folders defined in `App:DatabasePath` and `App:LogRootPath`.
 
 ---
 
-## Architecture Notes
+## 6 — AD Group Testing
 
-| Component              | Technology                                |
-|------------------------|-------------------------------------------|
-| UI Framework           | Blazor Server + MudBlazor v7              |
-| DICOM networking       | fo-dicom 5.x                              |
-| Auth                   | Windows Negotiate / Kerberos              |
-| Background processing  | `System.Threading.Channels` (serialised)  |
-| Database               | SQLite via EF Core 8                      |
-| Logging                | Per-run text file + ILogger               |
+To allow all domain users during development, set `AllowedAdGroups` to an empty array:
 
-### Job Queue Flow
+```json
+"AllowedAdGroups": []
+```
+
+This grants access to any authenticated domain account. Populate with specific groups before going to production.
+
+---
+
+## Architecture
+
+| Component | Technology |
+|---|---|
+| UI | Blazor Server + MudBlazor v7 |
+| Web server | Kestrel (standalone, no IIS) |
+| DICOM networking | fo-dicom 5.x |
+| Authentication | Windows Negotiate / Kerberos |
+| Job processing | `System.Threading.Channels` — single sequential queue |
+| Database | SQLite via EF Core 8 |
+| Run logs | Per-run text file written to `App:LogRootPath` |
+
+### Pages
+
+| Page | Purpose |
+|---|---|
+| Search | Query ARIA by Patient ID, view CT series, submit a correction job |
+| Monitor | Live scrolling log of the active job streamed in real time |
+| History | Searchable table of all previous runs with inline log viewer |
+
+### Job Pipeline
+
 ```
 User clicks "Correct Tilt"
         │
         ▼
-CorrectionJobQueue (Channel<QueuedJob>)
+CorrectionJobQueue  (Channel<QueuedJob>, capacity 64)
         │
-        ▼  (single background thread)
-CorrectionJobProcessor (BackgroundService)
+        ▼  one job at a time
+CorrectionJobProcessor  (BackgroundService)
         │
-        ├─ C-MOVE SCU ──────────────────────► ARIA
-        │                                       │
-        ◄── C-STORE SCP (HostedService) ────────┘
+        ├─ store.Expect(seriesUid)        open the store for this series only
+        ├─ C-MOVE SCU ───────────────────► ARIA
+        │                                    │
+        │  C-STORE SCP (HostedService) ◄─────┘
+        │  slices held in InMemoryDicomStore
+        │  (slices for any other series are dropped)
         │
-        ├─ Load DICOM datasets
-        ├─ CalculateTilt (ImageOrientationPatient)
-        ├─ ApplyTiltCorrection (rotation matrix)
-        ├─ Save corrected files
-        ├─ Upload back to ARIA (C-STORE SCU)
-        └─ Persist CorrectionRun to SQLite
+        ├─ poll until slice count stable (5 s window)
+        ├─ Drain() → sorted List<DicomDataset>
+        ├─ ITiltCorrector.CorrectAsync()  your algorithm
+        ├─ SendToAriaAsync()              C-STORE SCU, up to 3 retries
+        └─ persist CorrectionRun → SQLite
 ```
 
-### Tilt Correction Algorithm
-Tilt is derived from the Z-component of the column direction cosine in the
-`ImageOrientationPatient` tag. The inverse rotation is applied to both the
-`ImageOrientationPatient` and `ImagePositionPatient` tags of each slice.
+### Concurrency
 
-**Production**: Pixel-level resampling (shear interpolation) should be added
-using ITK.NET or a custom trilinear interpolation kernel operating on the
-`DicomPixelData` extracted from each slice's `PixelData` tag.
+Multiple users can search (C-FIND) simultaneously without issue. Correction jobs are queued and processed strictly one at a time — the processor does not dequeue the next job until the current one has fully completed including upload. The `InMemoryDicomStore` only accepts slices for the currently active series; any unexpected slices are silently dropped and logged as warnings. Upload failures retry up to 3 times with a 5-second delay before the job is marked Failed.
