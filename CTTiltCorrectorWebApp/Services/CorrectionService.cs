@@ -117,7 +117,8 @@ public class CorrectionService
 
         try
         {
-            // ── 2. Request ARIA to push the series to our SCP ─────────────────
+            // ── 2. Register series as expected, then request ARIA to push ─────
+            _store.Expect(job.SeriesInstanceUid);
             combined.Report("⬇  Requesting series from ARIA via C-MOVE…");
             await _dicomQuery.MoveSeriesAsync(
                 job.StudyInstanceUid,
@@ -220,53 +221,105 @@ public class CorrectionService
 
     // ─── Step 6: send corrected datasets to ARIA ──────────────────────────────
 
+    private const int MaxUploadAttempts = 3;
+    private static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(5);
+
     /// <summary>
     /// Opens a single DICOM association to ARIA and C-STOREs every corrected
-    /// dataset. All data lives in memory — no temp files created.
+    /// dataset. Retries the entire association up to <see cref="MaxUploadAttempts"/>
+    /// times on failure. Throws if all attempts are exhausted or if any individual
+    /// slice response is non-Success, which causes the job to be marked Failed.
     /// </summary>
     private async Task SendToAriaAsync(
         List<DicomDataset> datasets,
         IProgress<string> progress,
         CancellationToken ct)
     {
-        var client = DicomClientFactory.Create(
-            _dicomCfg.RemoteHost,
-            _dicomCfg.RemotePort,
-            useTls: false,
-            callingAe: _dicomCfg.LocalAeTitle,
-            calledAe: _dicomCfg.RemoteAeTitle);
-
-        client.ServiceOptions.RequestTimeout =
-            TimeSpan.FromSeconds(_dicomCfg.ConnectionTimeoutSeconds);
-
-        int sent = 0;
         int total = datasets.Count;
 
-        foreach (var dataset in datasets)
+        for (int attempt = 1; attempt <= MaxUploadAttempts; attempt++)
         {
             ct.ThrowIfCancellationRequested();
 
-            // Wrap the in-memory dataset in a DicomFile so C-STORE can send it
-            var dicomFile = new DicomFile(dataset);
-            var request   = new DicomCStoreRequest(dicomFile);
-
-            int capturedIndex = ++sent; // capture for lambda
-            request.OnResponseReceived += (_, response) =>
+            if (attempt > 1)
             {
-                if (response.Status != DicomStatus.Success)
-                    _logger.LogWarning(
-                        "C-STORE response non-success for slice {N}/{T}: {Status}",
-                        capturedIndex, total, response.Status);
-            };
+                progress.Report($"  ⏳ Retry {attempt}/{MaxUploadAttempts} in {RetryDelay.TotalSeconds}s…");
+                await Task.Delay(RetryDelay, ct);
+            }
 
-            await client.AddRequestAsync(request);
+            var failures = new List<(int Index, DicomStatus Status)>();
+            int sent = 0;
 
-            if (sent % 20 == 0 || sent == total)
-                progress.Report($"  Queued {sent}/{total} slices for upload…");
+            try
+            {
+                var client = DicomClientFactory.Create(
+                    _dicomCfg.RemoteHost,
+                    _dicomCfg.RemotePort,
+                    useTls: false,
+                    callingAe: _dicomCfg.LocalAeTitle,
+                    calledAe: _dicomCfg.RemoteAeTitle);
+
+                client.ServiceOptions.RequestTimeout =
+                    TimeSpan.FromSeconds(_dicomCfg.ConnectionTimeoutSeconds);
+
+                foreach (var dataset in datasets)
+                {
+                    ct.ThrowIfCancellationRequested();
+
+                    var dicomFile = new DicomFile(dataset);
+                    var request   = new DicomCStoreRequest(dicomFile);
+                    int capturedIndex = ++sent;
+
+                    request.OnResponseReceived += (_, response) =>
+                    {
+                        if (response.Status != DicomStatus.Success)
+                        {
+                            failures.Add((capturedIndex, response.Status));
+                            _logger.LogWarning(
+                                "C-STORE non-success slice {N}/{T}: {Status}",
+                                capturedIndex, total, response.Status);
+                        }
+                    };
+
+                    await client.AddRequestAsync(request);
+
+                    if (sent % 20 == 0 || sent == total)
+                        progress.Report($"  Queued {sent}/{total} slices for upload…");
+                }
+
+                await client.SendAsync(ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                var msg = $"  ❌ Upload attempt {attempt}/{MaxUploadAttempts} failed: {ex.Message}";
+                progress.Report(msg);
+                _logger.LogError(ex, "Upload attempt {Attempt} failed.", attempt);
+
+                if (attempt == MaxUploadAttempts)
+                    throw new InvalidOperationException(
+                        $"Upload to ARIA failed after {MaxUploadAttempts} attempts. Last error: {ex.Message}", ex);
+
+                continue; // retry
+            }
+
+            // Association succeeded — check for per-slice failures
+            if (failures.Count > 0)
+            {
+                var detail = string.Join(", ", failures.Select(f => $"slice {f.Index}: {f.Status}"));
+                var msg = $"  ❌ {failures.Count}/{total} slices rejected by ARIA: {detail}";
+                progress.Report(msg);
+
+                if (attempt == MaxUploadAttempts)
+                    throw new InvalidOperationException(
+                        $"{failures.Count}/{total} slices failed after {MaxUploadAttempts} attempts. {detail}");
+
+                continue; // retry
+            }
+
+            // All slices confirmed Success
+            progress.Report($"  ✅ Upload complete — {total}/{total} slices accepted by ARIA.");
+            return;
         }
-
-        await client.SendAsync(ct);
-        progress.Report($"  C-STORE SCU association closed — {total} slices sent.");
     }
 
     // ─── Helpers ──────────────────────────────────────────────────────────────

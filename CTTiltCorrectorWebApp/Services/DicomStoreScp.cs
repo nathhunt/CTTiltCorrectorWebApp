@@ -107,11 +107,16 @@ public class CStoreScp : DicomService, IDicomServiceProvider, IDicomCStoreProvid
             var seriesUid = request.Dataset
                 .GetSingleValueOrDefault(DicomTag.SeriesInstanceUID, "UnknownSeries");
 
-            _ctx.Store.Add(seriesUid, request.Dataset.Clone());
+            var accepted = _ctx.Store.Add(seriesUid, request.Dataset.Clone());
 
-            _ctx.Logger.LogDebug(
-                "C-STORE received SOP={Sop} Series={Series}",
-                request.SOPInstanceUID.UID, seriesUid);
+            if (accepted)
+                _ctx.Logger.LogDebug(
+                    "C-STORE received SOP={Sop} Series={Series}",
+                    request.SOPInstanceUID.UID, seriesUid);
+            else
+                _ctx.Logger.LogWarning(
+                    "C-STORE dropped unexpected SOP={Sop} Series={Series} — not registered",
+                    request.SOPInstanceUID.UID, seriesUid);
 
             return Task.FromResult(new DicomCStoreResponse(request, DicomStatus.Success));
         }
@@ -135,31 +140,48 @@ public class CStoreScp : DicomService, IDicomServiceProvider, IDicomCStoreProvid
 /// <summary>
 /// Thread-safe singleton that accumulates received <see cref="DicomDataset"/>
 /// objects in memory, keyed by Series Instance UID.
-/// Replaces all file-system staging — nothing is written to disk.
+///
+/// Only series explicitly registered via <see cref="Expect"/> will accept
+/// incoming slices. This prevents a queued job's C-MOVE response from landing
+/// in the store while a prior job is still being processed, which would cause
+/// mixed or contaminated datasets.
 /// </summary>
 public class InMemoryDicomStore
 {
     private readonly Dictionary<string, List<DicomDataset>> _store = new();
+    private readonly HashSet<string> _expected = new();
     private readonly object _lock = new();
 
-    /// <summary>Adds a received dataset to the buffer for the given series.</summary>
-    public void Add(string seriesUid, DicomDataset dataset)
+    /// <summary>
+    /// Registers a series UID as expected before the C-MOVE is issued.
+    /// Slices will be silently dropped for any series not registered here.
+    /// </summary>
+    public void Expect(string seriesUid)
     {
         lock (_lock)
         {
-            if (!_store.TryGetValue(seriesUid, out var list))
-            {
-                list = new List<DicomDataset>();
-                _store[seriesUid] = list;
-            }
-            list.Add(dataset);
+            _expected.Add(seriesUid);
+            _store.TryAdd(seriesUid, new List<DicomDataset>());
         }
     }
 
     /// <summary>
-    /// Returns the current number of buffered slices without removing them.
-    /// Used by the pipeline to poll for delivery completion.
+    /// Adds a received dataset. Returns false and discards if the series
+    /// was not registered via <see cref="Expect"/> (stale or unexpected push).
     /// </summary>
+    public bool Add(string seriesUid, DicomDataset dataset)
+    {
+        lock (_lock)
+        {
+            if (!_expected.Contains(seriesUid))
+                return false;
+
+            _store[seriesUid].Add(dataset);
+            return true;
+        }
+    }
+
+    /// <summary>Returns the current slice count without removing anything.</summary>
     public int Count(string seriesUid)
     {
         lock (_lock)
@@ -168,12 +190,13 @@ public class InMemoryDicomStore
 
     /// <summary>
     /// Atomically removes and returns all buffered datasets for the series,
-    /// sorted by Instance Number ascending (correct anatomical order).
+    /// sorted ascending by Instance Number. Also unregisters the series.
     /// </summary>
     public List<DicomDataset> Drain(string seriesUid)
     {
         lock (_lock)
         {
+            _expected.Remove(seriesUid);
             if (!_store.Remove(seriesUid, out var datasets))
                 return new List<DicomDataset>();
 
@@ -189,6 +212,9 @@ public class InMemoryDicomStore
     public void Discard(string seriesUid)
     {
         lock (_lock)
+        {
+            _expected.Remove(seriesUid);
             _store.Remove(seriesUid);
+        }
     }
 }
