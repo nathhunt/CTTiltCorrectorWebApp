@@ -11,26 +11,23 @@
 
 <!-- Search bar -->
 <MudPaper Class="pa-4 mb-4" Elevation="2">
-    <MudGrid AlignItems="Center">
-        <MudItem xs="12" md="5">
-            <MudTextField @bind-Value="_filterPatientId"
-                          Label="Filter by Patient ID"
-                          Variant="Variant.Outlined"
-                          Adornment="Adornment.Start"
-                          AdornmentIcon="@Icons.Material.Filled.FilterAlt"
-                          Immediate="false"
-                          DebounceInterval="400"
-                          OnDebounceIntervalElapsed="LoadAsync" />
-        </MudItem>
-        <MudItem xs="12" md="2">
-            <MudButton Variant="Variant.Outlined"
+    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="3" Style="width: fit-content">
+        <MudTextField @bind-Value="_filterPatientId"
+                    Label="Filter by Patient ID"
+                    Variant="Variant.Outlined"
+                    Adornment="Adornment.Start"
+                    AdornmentIcon="@Icons.Material.Filled.FilterAlt"
+                    Immediate="false"
+                    DebounceInterval="400"
+                    OnDebounceIntervalElapsed="LoadAsync"
+                      Style="width: 300px" />
+        <MudButton Variant="Variant.Outlined"
                        StartIcon="@Icons.Material.Filled.Refresh"
                        OnClick="LoadAsync"
                        FullWidth="true">
                 Refresh
             </MudButton>
-        </MudItem>
-    </MudGrid>
+    </MudStack>
 </MudPaper>
 
 <MudTable Items="_runs"

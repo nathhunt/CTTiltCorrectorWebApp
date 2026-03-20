@@ -11,6 +11,7 @@ namespace CTTiltCorrector.Services;
 public record DicomSeriesResult(
     string PatientId,
     string PatientName,
+    string PatientDOB,
     string StudyInstanceUid,
     string SeriesInstanceUid,
     string SeriesDescription,
@@ -165,6 +166,7 @@ public class DicomQueryService
     private static DicomSeriesResult MapDataset(DicomDataset ds) => new(
         PatientId:        ds.GetSingleValueOrDefault(DicomTag.PatientID, string.Empty),
         PatientName:      ds.GetSingleValueOrDefault(DicomTag.PatientName, string.Empty),
+        PatientDOB:       ds.GetSingleValueOrDefault(DicomTag.PatientBirthDate, string.Empty),
         StudyInstanceUid: ds.GetSingleValueOrDefault(DicomTag.StudyInstanceUID, string.Empty),
         SeriesInstanceUid:ds.GetSingleValueOrDefault(DicomTag.SeriesInstanceUID, string.Empty),
         SeriesDescription:ds.GetSingleValueOrDefault(DicomTag.SeriesDescription, string.Empty),

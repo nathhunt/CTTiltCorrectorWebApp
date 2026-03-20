@@ -13,28 +13,49 @@
 </MudText>
 
 <MudPaper Class="pa-4 mb-4" Elevation="2">
-    <MudGrid AlignItems="Center">
-        <MudItem xs="12" md="5">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+        
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="3" Style="width: fit-content">
             <MudTextField @bind-Value="_patientId"
                           Label="Patient ID (MRN)"
                           Variant="Variant.Outlined"
                           Adornment="Adornment.Start"
                           AdornmentIcon="@Icons.Material.Filled.Person"
                           Immediate="true"
-                          OnKeyDown="@OnKeyDown" />
-        </MudItem>
-        <MudItem xs="12" md="3">
+                          OnKeyDown="@OnKeyDown"
+                          Style="width: 300px" />
             <MudButton Variant="Variant.Filled"
                        Color="Color.Primary"
                        StartIcon="@Icons.Material.Filled.Search"
                        OnClick="SearchAsync"
-                       Disabled="_searching"
-                       FullWidth="true">
-                @if (_searching) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+                       Disabled="_searching">
+                @if (_searching)
+                {
+                    <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                }
                 Search ARIA
             </MudButton>
-        </MudItem>
-    </MudGrid>
+        </MudStack>
+
+        @if (_results is not null)
+        {
+            <MudPaper Elevation="0" Class="pa-3 d-flex align-center"
+                      Style="border: 0.5px solid var(--mud-palette-lines-default); border-radius: 12px; gap: 12px;">
+                <MudAvatar Color="Color.Info" Size="Size.Medium" Style="font-size:17px; font-weight:700">
+                    @Initials(_patientName)
+                </MudAvatar>
+                <div>
+                    <MudText Typo="Typo.body1" Style="font-weight:500; line-height:1.2">
+                        @FormatPatientName(_patientName)
+                    </MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                        DOB: @FormatDate(_patientDOB)
+                    </MudText>
+                </div>
+            </MudPaper>
+        }
+
+    </MudStack>
 </MudPaper>
 
 @if (_errorMessage is not null)
@@ -45,7 +66,7 @@
 @if (_results is not null)
 {
     <MudText Typo="Typo.subtitle1" Class="mb-2">
-        Found <strong>@_results.Count</strong> CT series for patient <strong>@_patientId</strong>
+        Found <strong>@_results.Count</strong> CT series
     </MudText>
 
     <MudTable Items="_results"
@@ -87,6 +108,8 @@
 
 @code {
     private string _patientId = string.Empty;
+    private string _patientName = string.Empty;
+    private string _patientDOB = string.Empty;
     private bool _searching;
     private bool _submitting;
     private string? _errorMessage;
@@ -97,25 +120,49 @@
         if (e.Key == "Enter") await SearchAsync();
     }
 
+    // private async Task SearchAsync()
+    // {
+    //     if (string.IsNullOrWhiteSpace(_patientId)) return;
+    //     _errorMessage = null;
+    //     _results = null;
+    //     _searching = true;
+    //     try
+    //     {
+    //         var res = await DicomQuery.FindSeriesAsync(_patientId.Trim());
+    //         _results = res.ToList();
+    //         if (_results.Count > 0)
+    //         {
+    //             _patientName = _results[0].PatientName;
+    //             _patientDOB = _results[0].PatientDOB;
+    //         }
+    //     }
+    //     catch (Exception ex)
+    //     {
+    //         _errorMessage = $"Query failed: {ex.Message}";
+    //     }
+    //     finally
+    //     {
+    //         _searching = false;
+    //     }
+    // }
+
+    // Test stub for UI.
     private async Task SearchAsync()
     {
         if (string.IsNullOrWhiteSpace(_patientId)) return;
         _errorMessage = null;
         _results = null;
         _searching = true;
-        try
+
+        await Task.Delay(500);
+        _results = new List<DicomSeriesResult>
         {
-            var res = await DicomQuery.FindSeriesAsync(_patientId.Trim());
-            _results = res.ToList();
-        }
-        catch (Exception ex)
-        {
-            _errorMessage = $"Query failed: {ex.Message}";
-        }
-        finally
-        {
-            _searching = false;
-        }
+            new("asd123", "Smith^John", "19620314", "1.2.840.10008.1", "1.2.840.10008.1.1", "HEAD ROUTINE", "CT", "20240315", 300),
+            new("asd123", "Smith^John", "19620314", "1.2.840.10008.1", "1.2.840.10008.1.2", "CHEST CT", "CT", "20240315", 200),
+        };
+        _patientName = "Smith^John";
+        _patientDOB = "19620314";
+        _searching = false;
     }
 
     private async Task SubmitJobAsync(DicomSeriesResult series)
@@ -162,6 +209,49 @@
                 System.Globalization.DateTimeStyles.None, out var dt))
             return dt.ToString("dd MMM yyyy");
         return raw;
+    }
+
+    private static string Initials(string dicomName)
+    {
+        if (string.IsNullOrWhiteSpace(dicomName))
+            return "?";
+
+        // Take only the alphabetic component group (before any '=')
+        var alphabetic = dicomName.Split('=')[0];
+
+        // Split into components: Family^Given^Middle^Prefix^Suffix
+        var parts = alphabetic.Split('^');
+
+        var family = parts.ElementAtOrDefault(0)?.Trim();
+        var given = parts.ElementAtOrDefault(1)?.Trim();
+
+        return (string.IsNullOrEmpty(family), string.IsNullOrEmpty(given)) switch
+        {
+            (false, false) => $"{given[0]}{family[0]}",   // JS  (John Smith)
+            (false, true) => $"{family[0]}",              // S   (family only)
+            (true, false) => $"{given[0]}",               // J   (given only)
+            _ => "?"                           // nothing usable
+        };
+    }
+
+    private static string FormatPatientName(string dicomName)
+    {
+        if (string.IsNullOrWhiteSpace(dicomName))
+            return "Unknown";
+
+        var alphabetic = dicomName.Split('=')[0];
+        var parts = alphabetic.Split('^');
+
+        var family = parts.ElementAtOrDefault(0)?.Trim();
+        var given = parts.ElementAtOrDefault(1)?.Trim();
+
+        return (string.IsNullOrEmpty(family), string.IsNullOrEmpty(given)) switch
+        {
+            (false, false) => $"{given} {family}",
+            (false, true) => family,
+            (true, false) => given,
+            _ => "Unknown"
+        };
     }
 
     private static string TruncateUid(string uid)
