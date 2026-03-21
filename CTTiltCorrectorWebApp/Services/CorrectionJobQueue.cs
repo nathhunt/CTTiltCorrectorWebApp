@@ -55,15 +55,18 @@ public class CorrectionJobProcessor : BackgroundService
     private readonly CorrectionJobQueue _queue;
     private readonly IServiceProvider _services;
     private readonly ILogger<CorrectionJobProcessor> _logger;
+    private readonly MonitorState _monitorState;
 
     public CorrectionJobProcessor(
         CorrectionJobQueue queue,
         IServiceProvider services,
-        ILogger<CorrectionJobProcessor> logger)
+        ILogger<CorrectionJobProcessor> logger,
+        MonitorState monitorState)
     {
         _queue    = queue;
         _services = services;
         _logger   = logger;
+        _monitorState = monitorState;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -95,6 +98,10 @@ public class CorrectionJobProcessor : BackgroundService
             {
                 _logger.LogError(ex, "Job failed: {Series}", queued.Job.SeriesInstanceUid);
                 queued.Progress.Report($"❌ Unhandled error: {ex.Message}");
+            }
+            finally
+            {
+                _monitorState.SetJobFinished(queued.Job.UserName);
             }
         }
 

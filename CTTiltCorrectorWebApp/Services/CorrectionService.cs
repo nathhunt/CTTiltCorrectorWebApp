@@ -63,6 +63,7 @@ public class CorrectionService
     private readonly InMemoryDicomStore _store;
     private readonly ITiltCorrector _corrector;
     private readonly IDbContextFactory<AppDbContext> _dbFactory;
+    private readonly MonitorState _monitorState;
     private readonly DicomConfig _dicomCfg;
     private readonly AppConfig _appCfg;
     private readonly ILogger<CorrectionService> _logger;
@@ -76,17 +77,19 @@ public class CorrectionService
         InMemoryDicomStore store,
         ITiltCorrector corrector,
         IDbContextFactory<AppDbContext> dbFactory,
+        MonitorState monitorState,
         IOptions<DicomConfig> dicomCfg,
         IOptions<AppConfig> appCfg,
         ILogger<CorrectionService> logger)
     {
         _dicomQuery = dicomQuery;
-        _store      = store;
-        _corrector  = corrector;
-        _dbFactory  = dbFactory;
-        _dicomCfg   = dicomCfg.Value;
-        _appCfg     = appCfg.Value;
-        _logger     = logger;
+        _store = store;
+        _corrector = corrector;
+        _dbFactory = dbFactory;
+        _monitorState = monitorState;
+        _dicomCfg = dicomCfg.Value;
+        _appCfg = appCfg.Value;
+        _logger = logger;
     }
 
     // ─── Main pipeline ────────────────────────────────────────────────────────
@@ -100,17 +103,24 @@ public class CorrectionService
         var (logPath, logWriter) = CreateLogWriter(job);
         await using var _ = logWriter;
 
-        var combined = Combine(progress, logWriter);
+        // Notify this user's Monitor channel that a job is starting
+        _monitorState.SetJobStarted(
+            job.UserName,
+            $"{job.PatientId} — {job.SeriesInstanceUid[^Math.Min(20, job.SeriesInstanceUid.Length)..]}");
+
+        // Route progress to both the user's Monitor channel and the log file
+        var userProgress = _monitorState.CreateProgressReporter(job.UserName);
+        var combined = Combine(userProgress, logWriter);
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var run = new CorrectionRun
         {
-            PatientId         = job.PatientId,
+            PatientId = job.PatientId,
             SeriesInstanceUid = job.SeriesInstanceUid,
-            ExecutionDate     = DateTime.UtcNow,
-            UserName          = job.UserName,
-            LogFilePath       = logPath,
-            Status            = "Running"
+            ExecutionDate = DateTime.UtcNow,
+            UserName = job.UserName,
+            LogFilePath = logPath,
+            Status = "Running"
         };
         db.CorrectionRuns.Add(run);
         await db.SaveChangesAsync(ct);
@@ -174,6 +184,7 @@ public class CorrectionService
             db.CorrectionRuns.Update(run);
             await db.SaveChangesAsync(CancellationToken.None);
             await logWriter.FlushAsync(CancellationToken.None);
+            _monitorState.SetJobFinished(job.UserName);
         }
     }
 
@@ -192,8 +203,8 @@ public class CorrectionService
         IProgress<string> progress,
         CancellationToken ct)
     {
-        int lastCount  = -1;
-        var stableFor  = TimeSpan.Zero;
+        int lastCount = -1;
+        var stableFor = TimeSpan.Zero;
 
         while (!ct.IsCancellationRequested)
         {
@@ -267,7 +278,7 @@ public class CorrectionService
                     ct.ThrowIfCancellationRequested();
 
                     var dicomFile = new DicomFile(dataset);
-                    var request   = new DicomCStoreRequest(dicomFile);
+                    var request = new DicomCStoreRequest(dicomFile);
                     int capturedIndex = ++sent;
 
                     request.OnResponseReceived += (_, response) =>
@@ -327,7 +338,7 @@ public class CorrectionService
     private (string path, StreamWriter writer) CreateLogWriter(CorrectionJob job)
     {
         var timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
-        var folder    = Path.Combine(_appCfg.LogRootPath, $"{timestamp}_{job.PatientId}");
+        var folder = Path.Combine(_appCfg.LogRootPath, $"{timestamp}_{job.PatientId}");
         Directory.CreateDirectory(folder);
         var path = Path.Combine(folder, "run.log");
         return (path, new StreamWriter(path, append: false));

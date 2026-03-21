@@ -117,7 +117,18 @@
 
     private async Task OnKeyDown(KeyboardEventArgs e)
     {
-        if (e.Key == "Enter") await SearchAsync();
+        if (e.Key == "Enter") 
+        {
+            await SearchAsync();
+        }
+        else
+        {
+            _results = null;
+            _patientId = string.Empty;
+            _patientName = string.Empty;
+            _patientDOB = string.Empty;
+        }
+
     }
 
     // private async Task SearchAsync()
@@ -172,17 +183,13 @@
         {
             var user = HttpContextAccessor.HttpContext?.User?.Identity?.Name ?? "Unknown";
 
-            // Create a progress sink that streams messages to the Monitor page
-            // via a shared singleton (MonitorState injected from DI).
-            var progress = new Progress<string>(_ => { }); // wired in Monitor page
-
             var job = new CorrectionJob(
                 series.PatientId,
                 series.StudyInstanceUid,
                 series.SeriesInstanceUid,
                 user);
 
-            await JobQueue.TryEnqueueAsync(job, progress);
+            await JobQueue.TryEnqueueAsync(job, new Progress<string>(_ => { }));
 
             Snackbar.Add(
                 $"Job queued for series {TruncateUid(series.SeriesInstanceUid)}. " +

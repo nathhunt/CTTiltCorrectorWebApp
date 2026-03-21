@@ -1,14 +1,13 @@
 namespace CTTiltCorrector.Services;
 
+// ─── Per-user channel ─────────────────────────────────────────────────────────
+
 /// <summary>
-/// Singleton that bridges the background <see cref="CorrectionJobProcessor"/>
-/// to the Monitor Blazor page. Progress messages are stored in a ring-buffer
-/// and fanned-out to all subscribed UI callbacks via StateHasChanged.
+/// Holds the live log state for a single user's active job.
 /// </summary>
-public class MonitorState
+public class UserMonitorChannel
 {
     private const int MaxLines = 500;
-
     private readonly List<string> _lines = new(MaxLines);
     private readonly List<Action> _subscribers = new();
     private readonly object _lock = new();
@@ -72,4 +71,52 @@ public class MonitorState
             catch { /* subscriber may have disconnected */ }
         }
     }
+}
+
+// ─── Singleton router ─────────────────────────────────────────────────────────
+
+/// <summary>
+/// Singleton that maintains one <see cref="UserMonitorChannel"/> per Windows
+/// username. The Monitor page requests the channel for the current user —
+/// it will only ever receive messages from that user's own jobs.
+/// </summary>
+public class MonitorState
+{
+    private readonly Dictionary<string, UserMonitorChannel> _channels = new();
+    private readonly object _lock = new();
+
+    /// <summary>
+    /// Returns the channel for the given user, creating it if it doesn't exist.
+    /// </summary>
+    public UserMonitorChannel GetChannel(string userName)
+    {
+        lock (_lock)
+        {
+            if (!_channels.TryGetValue(userName, out var channel))
+            {
+                channel = new UserMonitorChannel();
+                _channels[userName] = channel;
+            }
+            return channel;
+        }
+    }
+
+    /// <summary>
+    /// Convenience: creates a progress reporter that writes to the given user's channel.
+    /// Called by CorrectionService when a job starts.
+    /// </summary>
+    public IProgress<string> CreateProgressReporter(string userName)
+        => GetChannel(userName).CreateProgressReporter();
+
+    /// <summary>
+    /// Marks the user's channel as running and clears previous log lines.
+    /// </summary>
+    public void SetJobStarted(string userName, string description)
+        => GetChannel(userName).SetJobStarted(description);
+
+    /// <summary>
+    /// Marks the user's channel as finished.
+    /// </summary>
+    public void SetJobFinished(string userName)
+        => GetChannel(userName).SetJobFinished();
 }

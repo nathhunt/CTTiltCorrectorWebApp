@@ -61,7 +61,8 @@
                            Color="Color.Primary"
                            Size="Size.Small"
                            Title="View log"
-                           OnClick="() => ViewLogAsync(context)" />
+                           OnClick="() => ViewLogAsync(context)" 
+                           Disabled="@context.Status.Equals("Running")"/>
         </MudTd>
     </RowTemplate>
     <NoRecordsContent>
