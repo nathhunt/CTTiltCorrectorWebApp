@@ -14,8 +14,8 @@ public class CorrectionRun
     /// <summary>DICOM Series Instance UID that was corrected.</summary>
     public string SeriesInstanceUid { get; set; } = string.Empty;
 
-    /// <summary>UTC timestamp when the job started.</summary>
-    public DateTime ExecutionDate { get; set; } = DateTime.UtcNow;
+    /// <summary>Timestamp when the job started.</summary>
+    public DateTime ExecutionDate { get; set; } = DateTime.Now;
 
     /// <summary>Windows domain username (e.g. DOMAIN\jsmith).</summary>
     public string UserName { get; set; } = string.Empty;

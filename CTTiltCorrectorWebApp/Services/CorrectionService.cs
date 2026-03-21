@@ -117,7 +117,7 @@ public class CorrectionService
         {
             PatientId = job.PatientId,
             SeriesInstanceUid = job.SeriesInstanceUid,
-            ExecutionDate = DateTime.UtcNow,
+            ExecutionDate = DateTime.Now,
             UserName = job.UserName,
             LogFilePath = logPath,
             Status = "Running"
@@ -337,10 +337,10 @@ public class CorrectionService
 
     private (string path, StreamWriter writer) CreateLogWriter(CorrectionJob job)
     {
-        var timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
-        var folder = Path.Combine(_appCfg.LogRootPath, $"{timestamp}_{job.PatientId}");
-        Directory.CreateDirectory(folder);
-        var path = Path.Combine(folder, "run.log");
+        var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss.fff");
+        if (!Directory.Exists(_appCfg.LogRootPath)) { Directory.CreateDirectory(_appCfg.LogRootPath); }
+
+        var path = Path.Combine(_appCfg.LogRootPath, $"{timestamp}_{job.PatientId}.log");
         return (path, new StreamWriter(path, append: false));
     }
 
@@ -350,7 +350,7 @@ public class CorrectionService
     private static IProgress<string> Combine(IProgress<string> ui, StreamWriter log)
         => new Progress<string>(msg =>
         {
-            var line = $"[{DateTime.UtcNow:HH:mm:ss.fff}] {msg}";
+            var line = $"[{DateTime.Now:HH:mm:ss.fff}] {msg}";
             ui.Report(line);
             log.WriteLine(line);
             log.Flush();
