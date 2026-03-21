@@ -189,7 +189,7 @@
                 series.SeriesInstanceUid,
                 user);
 
-            await JobQueue.TryEnqueueAsync(job, new Progress<string>(_ => { }));
+            await JobQueue.EnqueueAsync(job);
 
             Snackbar.Add(
                 $"Job queued for series {TruncateUid(series.SeriesInstanceUid)}. " +

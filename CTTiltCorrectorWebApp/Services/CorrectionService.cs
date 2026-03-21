@@ -96,7 +96,6 @@ public class CorrectionService
 
     public async Task RunAsync(
         CorrectionJob job,
-        IProgress<string> progress,
         CancellationToken ct)
     {
         // ── 1. Create log file + DB record ────────────────────────────────────
@@ -110,7 +109,7 @@ public class CorrectionService
 
         // Route progress to both the user's Monitor channel and the log file
         var userProgress = _monitorState.CreateProgressReporter(job.UserName);
-        var combined = Combine(userProgress, logWriter);
+        var combinedLogger = CombinedLogger(userProgress, logWriter);
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var run = new CorrectionRun
@@ -129,52 +128,52 @@ public class CorrectionService
         {
             // ── 2. Register series as expected, then request ARIA to push ─────
             _store.Expect(job.SeriesInstanceUid);
-            combined.Report("⬇  Requesting series from ARIA via C-MOVE…");
+            combinedLogger.Report("⬇  Requesting series from ARIA via C-MOVE…");
             await _dicomQuery.MoveSeriesAsync(
                 job.StudyInstanceUid,
                 job.SeriesInstanceUid,
-                progress: combined,
+                progress: combinedLogger,
                 ct: ct);
 
             // ── 3. Wait until all slices have arrived in memory ───────────────
-            combined.Report("⏳  Waiting for all slices to arrive…");
-            await WaitForStableDeliveryAsync(job.SeriesInstanceUid, combined, ct);
+            combinedLogger.Report("⏳  Waiting for all slices to arrive…");
+            await WaitForStableDeliveryAsync(job.SeriesInstanceUid, combinedLogger, ct);
 
             // ── 4. Drain from the in-memory store (sorted by Instance Number) ─
             var slices = _store.Drain(job.SeriesInstanceUid);
-            combined.Report($"✅  {slices.Count} slices received into memory.");
+            combinedLogger.Report($"✅  {slices.Count} slices received into memory.");
 
             if (slices.Count == 0)
                 throw new InvalidOperationException(
                     "No DICOM slices were received. Verify ARIA C-MOVE config.");
 
             // ── 5. Call your tilt correction function ─────────────────────────
-            combined.Report("🔧  Calling tilt correction algorithm…");
-            List<DicomDataset> corrected = await _corrector.CorrectAsync(slices, combined, ct);
-            combined.Report($"✅  Correction complete — {corrected.Count} output slices.");
+            combinedLogger.Report("🔧  Calling tilt correction algorithm…");
+            List<DicomDataset> corrected = await _corrector.CorrectAsync(slices, combinedLogger, ct);
+            combinedLogger.Report($"✅  Correction complete — {corrected.Count} output slices.");
 
             // Release the source slices; corrected set is all we need now
             slices.Clear();
 
             // ── 6. Send corrected datasets back to ARIA via C-STORE SCU ───────
-            combined.Report($"⬆️  Sending {corrected.Count} corrected slices to ARIA…");
-            await SendToAriaAsync(corrected, combined, ct);
-            combined.Report("✅  Upload to ARIA complete.");
+            combinedLogger.Report($"⬆️  Sending {corrected.Count} corrected slices to ARIA…");
+            await SendToAriaAsync(corrected, combinedLogger, ct);
+            combinedLogger.Report("✅  Upload to ARIA complete.");
 
             run.Status = "Completed";
-            combined.Report("🏁  Job completed successfully.");
+            combinedLogger.Report("🏁  Job completed successfully.");
         }
         catch (OperationCanceledException)
         {
             run.Status = "Cancelled";
-            combined.Report("⚠️  Job cancelled.");
+            combinedLogger.Report("⚠️  Job cancelled.");
             _store.Discard(job.SeriesInstanceUid);
             _logger.LogWarning("Job cancelled: {Series}", job.SeriesInstanceUid);
         }
         catch (Exception ex)
         {
             run.Status = "Failed";
-            combined.Report($"❌  Job failed: {ex.Message}");
+            combinedLogger.Report($"❌  Job failed: {ex.Message}");
             _store.Discard(job.SeriesInstanceUid);
             _logger.LogError(ex, "Job failed: {Series}", job.SeriesInstanceUid);
             throw;
@@ -200,7 +199,7 @@ public class CorrectionService
     /// </summary>
     private async Task WaitForStableDeliveryAsync(
         string seriesUid,
-        IProgress<string> progress,
+        IProgress<string> combinedLogger,
         CancellationToken ct)
     {
         int lastCount = -1;
@@ -221,7 +220,7 @@ public class CorrectionService
                 stableFor = TimeSpan.Zero;
                 lastCount = current;
                 if (current > 0)
-                    progress.Report($"  {current} slices in memory…");
+                    combinedLogger.Report($"  {current} slices in memory…");
             }
 
             await Task.Delay(PollInterval, ct);
@@ -243,7 +242,7 @@ public class CorrectionService
     /// </summary>
     private async Task SendToAriaAsync(
         List<DicomDataset> datasets,
-        IProgress<string> progress,
+        IProgress<string> combinedLogger,
         CancellationToken ct)
     {
         int total = datasets.Count;
@@ -254,7 +253,7 @@ public class CorrectionService
 
             if (attempt > 1)
             {
-                progress.Report($"  ⏳ Retry {attempt}/{MaxUploadAttempts} in {RetryDelay.TotalSeconds}s…");
+                combinedLogger.Report($"  ⏳ Retry {attempt}/{MaxUploadAttempts} in {RetryDelay.TotalSeconds}s…");
                 await Task.Delay(RetryDelay, ct);
             }
 
@@ -295,7 +294,7 @@ public class CorrectionService
                     await client.AddRequestAsync(request);
 
                     if (sent % 20 == 0 || sent == total)
-                        progress.Report($"  Queued {sent}/{total} slices for upload…");
+                        combinedLogger.Report($"  Queued {sent}/{total} slices for upload…");
                 }
 
                 await client.SendAsync(ct);
@@ -303,7 +302,7 @@ public class CorrectionService
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 var msg = $"  ❌ Upload attempt {attempt}/{MaxUploadAttempts} failed: {ex.Message}";
-                progress.Report(msg);
+                combinedLogger.Report(msg);
                 _logger.LogError(ex, "Upload attempt {Attempt} failed.", attempt);
 
                 if (attempt == MaxUploadAttempts)
@@ -318,7 +317,7 @@ public class CorrectionService
             {
                 var detail = string.Join(", ", failures.Select(f => $"slice {f.Index}: {f.Status}"));
                 var msg = $"  ❌ {failures.Count}/{total} slices rejected by ARIA: {detail}";
-                progress.Report(msg);
+                combinedLogger.Report(msg);
 
                 if (attempt == MaxUploadAttempts)
                     throw new InvalidOperationException(
@@ -328,7 +327,7 @@ public class CorrectionService
             }
 
             // All slices confirmed Success
-            progress.Report($"  ✅ Upload complete — {total}/{total} slices accepted by ARIA.");
+            combinedLogger.Report($"  ✅ Upload complete — {total}/{total} slices accepted by ARIA.");
             return;
         }
     }
@@ -347,7 +346,7 @@ public class CorrectionService
     /// <summary>
     /// Wraps two progress sinks (UI + log file) into one combined reporter.
     /// </summary>
-    private static IProgress<string> Combine(IProgress<string> ui, StreamWriter log)
+    private static IProgress<string> CombinedLogger(IProgress<string> ui, StreamWriter log)
         => new Progress<string>(msg =>
         {
             var line = $"[{DateTime.Now:HH:mm:ss.fff}] {msg}";

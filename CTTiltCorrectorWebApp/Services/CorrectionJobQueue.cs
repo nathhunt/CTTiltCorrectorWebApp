@@ -26,14 +26,12 @@ public class CorrectionJobQueue
     /// Enqueues a job. Awaits if the channel is full.
     /// Returns the <see cref="IProgress{T}"/> sink the UI should subscribe to.
     /// </summary>
-    public async Task<bool> TryEnqueueAsync(
+    public async Task EnqueueAsync(
         CorrectionJob job,
-        IProgress<string> uiProgress,
         CancellationToken ct = default)
     {
-        var queued = new QueuedJob(job, uiProgress, ct);
+        var queued = new QueuedJob(job, ct);
         await _channel.Writer.WriteAsync(queued, ct);
-        return true;
     }
 }
 
@@ -41,7 +39,6 @@ public class CorrectionJobQueue
 
 public record QueuedJob(
     CorrectionJob Job,
-    IProgress<string> Progress,
     CancellationToken CancellationToken);
 
 // ─── Processor HostedService ─────────────────────────────────────────────────
@@ -87,7 +84,6 @@ public class CorrectionJobProcessor : BackgroundService
             {
                 await correctionService.RunAsync(
                     queued.Job,
-                    queued.Progress,
                     queued.CancellationToken);
             }
             catch (OperationCanceledException)
@@ -97,7 +93,10 @@ public class CorrectionJobProcessor : BackgroundService
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Job failed: {Series}", queued.Job.SeriesInstanceUid);
-                queued.Progress.Report($"❌ Unhandled error: {ex.Message}");
+                // Route the unhandled error to the submitting user's Monitor channel
+                _monitorState.GetChannel(queued.Job.UserName)
+                    .CreateProgressReporter()
+                    .Report($"❌ Unhandled error: {ex.Message}");
             }
             finally
             {
