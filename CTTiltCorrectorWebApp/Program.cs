@@ -4,6 +4,7 @@ using CTTiltCorrector.Infrastructure;
 using Microsoft.AspNetCore.Authentication.Negotiate;
 using Microsoft.EntityFrameworkCore;
 using MudBlazor.Services;
+using CTTiltCorrector.Corrector;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -71,7 +72,7 @@ builder.Services.AddHostedService<DicomStoreScp>();
 // ─── Tilt corrector — swap YourTiltCorrector for your concrete implementation ─
 // Your class must implement ITiltCorrector:
 //   Task<List<DicomDataset>> CorrectAsync(List<DicomDataset>, IProgress<string>, CancellationToken)
-builder.Services.AddScoped<ITiltCorrector, CTTiltCorrector.YourTiltCorrector>();
+builder.Services.AddScoped<ITiltCorrector, TiltCorrector>();
 
 // ─── Application Services ────────────────────────────────────────────────────
 builder.Services.AddScoped<DicomQueryService>();

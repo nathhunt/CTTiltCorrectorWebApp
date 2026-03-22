@@ -51,5 +51,5 @@ public class AppConfig
     /// Active Directory group whose members are allowed to use the application.
     /// Format: DOMAIN\\GroupName
     /// </summary>
-    public string RequiredAdGroup { get; set; } = "DOMAIN\\CT-TiltCorrector-Users";
+    public List<string> AllowedAdGroups { get; set; } = [];
 }

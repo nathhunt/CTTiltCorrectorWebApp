@@ -23,10 +23,16 @@
                     </div>
                 </MudAlert>
             }
-            else if (_lines.Count > 0)
+            else if (_lines.Count > 0 && !_lines.Any(l => l.Contains("❌")))
             {
                 <MudAlert Severity="Severity.Success" Dense="true">
                     Last job completed. Awaiting next submission.
+                </MudAlert>
+            }
+            else if (_lines.Count > 0 && _lines.Any(l => l.Contains("❌")))
+            {
+                <MudAlert Severity="Severity.Error" Dense="true">
+                    Last job failed. Awaiting next submission.
                 </MudAlert>
             }
             else

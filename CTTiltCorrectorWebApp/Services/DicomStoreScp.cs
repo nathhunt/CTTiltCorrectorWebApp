@@ -152,6 +152,8 @@ public class InMemoryDicomStore
     private readonly HashSet<string> _expected = new();
     private readonly object _lock = new();
 
+    public bool IsReceiving => _expected.Count > 0;
+
     /// <summary>
     /// Registers a series UID as expected before the C-MOVE is issued.
     /// Slices will be silently dropped for any series not registered here.

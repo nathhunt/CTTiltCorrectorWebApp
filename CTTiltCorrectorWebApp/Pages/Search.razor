@@ -234,9 +234,9 @@
 
         return (string.IsNullOrEmpty(family), string.IsNullOrEmpty(given)) switch
         {
-            (false, false) => $"{given[0]}{family[0]}",   // JS  (John Smith)
-            (false, true) => $"{family[0]}",              // S   (family only)
-            (true, false) => $"{given[0]}",               // J   (given only)
+            (false, false) => $"{given![0]}{family![0]}",   // JS  (John Smith)
+            (false, true) => $"{family![0]}",              // S   (family only)
+            (true, false) => $"{given![0]}",               // J   (given only)
             _ => "?"                           // nothing usable
         };
     }
@@ -254,9 +254,9 @@
 
         return (string.IsNullOrEmpty(family), string.IsNullOrEmpty(given)) switch
         {
-            (false, false) => $"{given} {family}",
-            (false, true) => family,
-            (true, false) => given,
+            (false, false) => $"{given!} {family!}",
+            (false, true) => family!,
+            (true, false) => given!,
             _ => "Unknown"
         };
     }

@@ -89,8 +89,7 @@ public class DicomQueryService
             seriesInstanceUid);
 
         var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        int completed = 0, warnings = 0, failures = 0;
-
+        
         request.OnResponseReceived += (_, response) =>
         {
             if (response.Status == DicomStatus.Pending)

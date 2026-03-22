@@ -1,4 +1,5 @@
 @inherits LayoutComponentBase
+@inject InMemoryDicomStore InMemoryDicomStore
 
 <MudThemeProvider Theme="_theme" IsDarkMode="_isDark" />
 <MudPopoverProvider />
@@ -58,12 +59,24 @@
             <MudText Typo="Typo.caption" Style="opacity:0.5; font-size:0.65rem;">
                 DICOM SCP
             </MudText>
-            <MudChip T="string" Color="Color.Success"
-                     Size="Size.Small"
-                     Icon="@Icons.Material.Filled.Circle"
-                     Class="mt-1">
-                Listening
-            </MudChip>
+            @if (InMemoryDicomStore.IsReceiving)
+            {
+                <MudChip T="string" Color="Color.Info"
+                         Size="Size.Small"
+                         Icon="@Icons.Material.Filled.Circle"
+                         Class="mt-1">
+                    Receiving
+                </MudChip>
+            }
+            else
+            {
+                <MudChip T="string" Color="Color.Success"
+                         Size="Size.Small"
+                         Icon="@Icons.Material.Filled.Circle"
+                         Class="mt-1">
+                    Listening
+                </MudChip>
+            }
         </MudPaper>
     </MudDrawer>
 
