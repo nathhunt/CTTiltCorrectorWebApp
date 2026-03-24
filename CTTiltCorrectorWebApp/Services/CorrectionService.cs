@@ -14,7 +14,8 @@ public record CorrectionJob(
     string PatientId,
     string StudyInstanceUid,
     string SeriesInstanceUid,
-    string UserName);
+    string UserName,
+    int ExpectedSliceCount);
 
 // ─── Interface for the tilt corrector (plug in your implementation) ───────────
 
@@ -137,7 +138,7 @@ public class CorrectionService
 
             // ── 3. Wait until all slices have arrived in memory ───────────────
             combinedLogger.Report("⏳  Waiting for all slices to arrive…");
-            await WaitForStableDeliveryAsync(job.SeriesInstanceUid, combinedLogger, ct);
+            await WaitForStableDeliveryAsync(job.SeriesInstanceUid, job.ExpectedSliceCount, combinedLogger, ct);
 
             // ── 4. Drain from the in-memory store (sorted by Instance Number) ─
             var slices = _store.Drain(job.SeriesInstanceUid);
@@ -190,42 +191,72 @@ public class CorrectionService
     // ─── Step 3: wait for stable slice count ─────────────────────────────────
 
     /// <summary>
-    /// Polls <see cref="InMemoryDicomStore"/> until the slice count has not
-    /// changed for <see cref="StableWindow"/>. This signals that ARIA has
-    /// finished pushing all images.
+    /// Waits until all expected slices have arrived in <see cref="InMemoryDicomStore"/>.
     ///
-    /// For a more deterministic approach, compare against the
-    /// NumberOfSeriesRelatedInstances value obtained during C-FIND.
+    /// Primary strategy: compare received count against <paramref name="expectedCount"/>
+    /// from NumberOfSeriesRelatedInstances (obtained at C-FIND time). This is
+    /// deterministic — we know exactly when delivery is complete.
+    ///
+    /// Fallback strategy: if <paramref name="expectedCount"/> is 0 or unreliable,
+    /// fall back to the stability window — wait until the count stops changing
+    /// for <see cref="StableWindow"/>. Less precise but handles ARIA servers that
+    /// report 0 or omit NumberOfSeriesRelatedInstances.
     /// </summary>
     private async Task WaitForStableDeliveryAsync(
         string seriesUid,
-        IProgress<string> combinedLogger,
+        int expectedCount,
+        IProgress<string> progress,
         CancellationToken ct)
     {
-        int lastCount = -1;
-        var stableFor = TimeSpan.Zero;
-
-        while (!ct.IsCancellationRequested)
+        if (expectedCount > 0)
         {
-            int current = _store.Count(seriesUid);
-
-            if (current == lastCount && current > 0)
+            // ── Deterministic: wait for exact count ───────────────────────────
+            progress.Report($"  Expecting {expectedCount} slices…");
+ 
+            while (!ct.IsCancellationRequested)
             {
-                stableFor += PollInterval;
-                if (stableFor >= StableWindow)
-                    return;  // count stable — delivery complete
+                int current = _store.Count(seriesUid);
+                progress.Report($"  {current}/{expectedCount} slices received…");
+ 
+                if (current >= expectedCount)
+                    return;
+ 
+                await Task.Delay(PollInterval, ct);
             }
-            else
-            {
-                stableFor = TimeSpan.Zero;
-                lastCount = current;
-                if (current > 0)
-                    combinedLogger.Report($"  {current} slices in memory…");
-            }
-
-            await Task.Delay(PollInterval, ct);
         }
-
+        else
+        {
+            // ── Fallback: stability window ────────────────────────────────────
+            progress.Report("  NumberOfSeriesRelatedInstances unavailable — using stability detection.");
+ 
+            int lastCount = -1;
+            var stableFor = TimeSpan.Zero;
+ 
+            while (!ct.IsCancellationRequested)
+            {
+                int current = _store.Count(seriesUid);
+ 
+                if (current > 0 && current == lastCount)
+                {
+                    stableFor += PollInterval;
+                    if (stableFor >= StableWindow)
+                    {
+                        progress.Report($"  Count stable at {current} — assuming delivery complete.");
+                        return;
+                    }
+                }
+                else
+                {
+                    stableFor = TimeSpan.Zero;
+                    lastCount = current;
+                    if (current > 0)
+                        progress.Report($"  {current} slices received so far…");
+                }
+ 
+                await Task.Delay(PollInterval, ct);
+            }
+        }
+ 
         ct.ThrowIfCancellationRequested();
     }
 

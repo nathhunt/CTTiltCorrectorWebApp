@@ -187,7 +187,8 @@
                 series.PatientId,
                 series.StudyInstanceUid,
                 series.SeriesInstanceUid,
-                user);
+                user,
+                series.NumberOfImages);
 
             bool accepted = await JobQueue.EnqueueAsync(job);
 
