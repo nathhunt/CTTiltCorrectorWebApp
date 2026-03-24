@@ -5,8 +5,8 @@ using itk.simple;
 namespace DicomTiltCorrector
 {
     /// <summary>
-    /// Writes the resampled SimpleITK volume back out as individual DICOM slice
-    /// files, one file per Z index.
+    /// Writes the resampled SimpleITK volume back out as individual DICOM slices,
+    /// one file per Z index.
     ///
     /// Because the resampled volume has an identity direction matrix, every output
     /// slice has:

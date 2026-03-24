@@ -2,7 +2,7 @@ using FellowOakDicom;
 
 namespace CTTiltCorrector.Corrector;
 
-public class DicomSeriesLoader
+public static class DicomSeriesLoader
 {
     public class SliceInfo
     {
@@ -12,7 +12,7 @@ public class DicomSeriesLoader
         public int InstanceNumber { get; set; }
     }
 
-    public List<SliceInfo> Load(List<DicomDataset> datasets)
+    public static List<SliceInfo> Load(List<DicomDataset> datasets)
     {
         var candidates = new List<SliceInfo>();
 

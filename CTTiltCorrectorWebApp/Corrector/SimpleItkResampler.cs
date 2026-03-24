@@ -1,16 +1,13 @@
 using FellowOakDicom;
 using FellowOakDicom.Imaging;
 using itk.simple;
-using System;
-using System.Collections.Generic;
 
 namespace CTTiltCorrector.Corrector;
 
-public class SimpleItkResampler(IProgress<string> progress)
+public static class SimpleItkResampler
 {  
-    private readonly IProgress<string> _progress = progress;
-
-    public Image Resample(IReadOnlyList<DicomSeriesLoader.SliceInfo> sortedSlices,
+    public static Image Resample(IReadOnlyList<DicomSeriesLoader.SliceInfo> sortedSlices,
+                          IProgress<string> progress,
                           double forcedSliceSpacingMm = 0)
     {
         if (sortedSlices == null || sortedSlices.Count == 0)
@@ -104,23 +101,31 @@ public class SimpleItkResampler(IProgress<string> progress)
             }
         }
 
-        // ── 5. From here: identical to original Resample() ────────────────
+        // ── 5. Report what ITK loaded ────────────────
         VectorDouble srcSpacing = src.GetSpacing();
         VectorUInt32 srcSize = src.GetSize();
         VectorDouble srcOrigin = src.GetOrigin();
         VectorDouble srcDir = src.GetDirection();
 
-        _progress.Report($"[ITK] Input size     : {srcSize[0]} x {srcSize[1]} x {srcSize[2]}");
-        _progress.Report($"[ITK] Input spacing  : {srcSpacing[0]:F4} x {srcSpacing[1]:F4} x {srcSpacing[2]:F4} mm");
-        _progress.Report($"[ITK] Input origin   : ({srcOrigin[0]:F3}, {srcOrigin[1]:F3}, {srcOrigin[2]:F3})");
-        _progress.Report($"[ITK] Input dir[0]   : ({srcDir[0]:F6}, {srcDir[1]:F6}, {srcDir[2]:F6})");
-        _progress.Report($"[ITK] Input dir[1]   : ({srcDir[3]:F6}, {srcDir[4]:F6}, {srcDir[5]:F6})");
-        _progress.Report($"[ITK] Input dir[2]   : ({srcDir[6]:F6}, {srcDir[7]:F6}, {srcDir[8]:F6})");
+        progress.Report($"[ITK] Input size     : {srcSize[0]} x {srcSize[1]} x {srcSize[2]}");
+        progress.Report($"[ITK] Input spacing  : {srcSpacing[0]:F4} x {srcSpacing[1]:F4} x {srcSpacing[2]:F4} mm");
+        progress.Report($"[ITK] Input origin   : ({srcOrigin[0]:F3}, {srcOrigin[1]:F3}, {srcOrigin[2]:F3})");
+        progress.Report($"[ITK] Input dir[0]   : ({srcDir[0]:F6}, {srcDir[1]:F6}, {srcDir[2]:F6})");
+        progress.Report($"[ITK] Input dir[1]   : ({srcDir[3]:F6}, {srcDir[4]:F6}, {srcDir[5]:F6})");
+        progress.Report($"[ITK] Input dir[2]   : ({srcDir[6]:F6}, {srcDir[7]:F6}, {srcDir[8]:F6})");
 
+        // ── 6. Choose output spacing ────────────────
+        
         double outSx = srcSpacing[0];
         double outSy = srcSpacing[1];
         double outSz = (forcedSliceSpacingMm > 0) ? forcedSliceSpacingMm : srcSpacing[2];
 
+        // ── 4. Compute output bounding box ─────────────────────────────────
+            //
+            // The tilted input volume's axis-aligned bounding box (AABB) defines
+            // the output extent.  We pass the full input geometry so that no
+            // anatomy is clipped when the gantry tilt rotates corner voxels
+            // outside the original X/Y footprint.
         var (aabbOrigin, gridSize) = VolumeGeometry.ComputeAxisAlignedBoundingBox(
             origin: new[] { srcOrigin[0], srcOrigin[1], srcOrigin[2] },
             direction: new[]
@@ -136,10 +141,22 @@ public class SimpleItkResampler(IProgress<string> progress)
         var outOrigin = new VectorDouble(aabbOrigin);
         var outSize = new VectorUInt32(gridSize);
 
-        _progress.Report($"[ITK] Output size    : {outSize[0]} x {outSize[1]} x {outSize[2]}");
-        _progress.Report($"[ITK] Output origin  : ({outOrigin[0]:F3}, {outOrigin[1]:F3}, {outOrigin[2]:F3})");
+        progress.Report($"[ITK] Output size    : {outSize[0]} x {outSize[1]} x {outSize[2]}");
+        progress.Report($"[ITK] Output origin  : ({outOrigin[0]:F3}, {outOrigin[1]:F3}, {outOrigin[2]:F3})");
 
+        // ── 5. Identity direction ──────────────────────────────────────────
+        //
+        // The output volume is resampled into standard HFS axial orientation:
+        // X → left-to-right, Y → posterior-to-anterior, Z → inferior-to-superior.
         var identityDir = new VectorDouble(new double[] { 1, 0, 0, 0, 1, 0, 0, 0, 1 });
+
+        // ── 6. Resample ────────────────────────────────────────────────────
+        //
+        // Linear interpolation is used to avoid aliasing artefacts at the
+        // resampled voxel boundaries.  The default pixel value is set to the
+        // corner voxel of the source volume (typically air, ~ -1024 HU) so
+        // that regions outside the original FOV are filled with a clinically
+        // neutral background rather than zero (which would be water density).
 
         double bgValue = src.GetPixelAsDouble(new VectorUInt32(new uint[] { 0, 0, 0 }));
 
@@ -151,14 +168,16 @@ public class SimpleItkResampler(IProgress<string> progress)
         resample.SetInterpolator(InterpolatorEnum.sitkLinear);
         resample.SetDefaultPixelValue(bgValue);
 
+        progress.Report("[ITK] Resampling ....");
+
         Image result = resample.Execute(src);
         src.Dispose();
 
         VectorDouble resDir = result.GetDirection();
-        _progress.Report($"[ITK] Result dir[0]  : ({resDir[0]:F6}, {resDir[1]:F6}, {resDir[2]:F6})");
-        _progress.Report($"[ITK] Result dir[1]  : ({resDir[3]:F6}, {resDir[4]:F6}, {resDir[5]:F6})");
-        _progress.Report($"[ITK] Result dir[2]  : ({resDir[6]:F6}, {resDir[7]:F6}, {resDir[8]:F6})");
-        _progress.Report("[ITK] Resampling complete.");
+        progress.Report($"[ITK] Result dir[0]  : ({resDir[0]:F6}, {resDir[1]:F6}, {resDir[2]:F6})");
+        progress.Report($"[ITK] Result dir[1]  : ({resDir[3]:F6}, {resDir[4]:F6}, {resDir[5]:F6})");
+        progress.Report($"[ITK] Result dir[2]  : ({resDir[6]:F6}, {resDir[7]:F6}, {resDir[8]:F6})");
+        progress.Report("[ITK] Resampling complete.");
 
         return result;
     }

@@ -19,8 +19,7 @@ public class TiltCorrector : ITiltCorrector
         progress.Report($"Loading {slices.Count} slices…");
 
         // ── 1. Load and sort ──────────────────────────────────────────────
-        var loader = new DicomSeriesLoader();
-        var sortedSlices = loader.Load(slices);
+        var sortedSlices = DicomSeriesLoader.Load(slices);
 
         // ── 2. Check if already identity IOP ─────────────────────────────
         string iopStr = sortedSlices[0].Dataset.GetString(DicomTag.ImageOrientationPatient)
@@ -50,8 +49,7 @@ public class TiltCorrector : ITiltCorrector
         Image corrected = await Task.Run(() =>
         {
             ct.ThrowIfCancellationRequested();
-            var resampler = new SimpleItkResampler(progress);
-            return resampler.Resample(sortedSlices, spacing);
+            return SimpleItkResampler.Resample(sortedSlices, progress, spacing);
         }, ct);
 
         // ── 6. Build output datasets ──────────────────────────────────────
