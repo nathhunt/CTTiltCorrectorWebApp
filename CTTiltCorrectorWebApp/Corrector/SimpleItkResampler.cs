@@ -6,8 +6,10 @@ using System.Collections.Generic;
 
 namespace CTTiltCorrector.Corrector;
 
-public class SimpleItkResampler
-{
+public class SimpleItkResampler(IProgress<string> progress)
+{  
+    private readonly IProgress<string> _progress = progress;
+
     public Image Resample(IReadOnlyList<DicomSeriesLoader.SliceInfo> sortedSlices,
                           double forcedSliceSpacingMm = 0)
     {
@@ -58,7 +60,7 @@ public class SimpleItkResampler
         rowDir[0], colDir[0], normal[0],
         rowDir[1], colDir[1], normal[1],
         rowDir[2], colDir[2], normal[2]
-    };
+        };
 
         // ── 3. Apply RescaleSlope/Intercept and build pixel buffer ─────────
         //
@@ -108,12 +110,12 @@ public class SimpleItkResampler
         VectorDouble srcOrigin = src.GetOrigin();
         VectorDouble srcDir = src.GetDirection();
 
-        Console.WriteLine($"[ITK] Input size     : {srcSize[0]} x {srcSize[1]} x {srcSize[2]}");
-        Console.WriteLine($"[ITK] Input spacing  : {srcSpacing[0]:F4} x {srcSpacing[1]:F4} x {srcSpacing[2]:F4} mm");
-        Console.WriteLine($"[ITK] Input origin   : ({srcOrigin[0]:F3}, {srcOrigin[1]:F3}, {srcOrigin[2]:F3})");
-        Console.WriteLine($"[ITK] Input dir[0]   : ({srcDir[0]:F6}, {srcDir[1]:F6}, {srcDir[2]:F6})");
-        Console.WriteLine($"[ITK] Input dir[1]   : ({srcDir[3]:F6}, {srcDir[4]:F6}, {srcDir[5]:F6})");
-        Console.WriteLine($"[ITK] Input dir[2]   : ({srcDir[6]:F6}, {srcDir[7]:F6}, {srcDir[8]:F6})");
+        _progress.Report($"[ITK] Input size     : {srcSize[0]} x {srcSize[1]} x {srcSize[2]}");
+        _progress.Report($"[ITK] Input spacing  : {srcSpacing[0]:F4} x {srcSpacing[1]:F4} x {srcSpacing[2]:F4} mm");
+        _progress.Report($"[ITK] Input origin   : ({srcOrigin[0]:F3}, {srcOrigin[1]:F3}, {srcOrigin[2]:F3})");
+        _progress.Report($"[ITK] Input dir[0]   : ({srcDir[0]:F6}, {srcDir[1]:F6}, {srcDir[2]:F6})");
+        _progress.Report($"[ITK] Input dir[1]   : ({srcDir[3]:F6}, {srcDir[4]:F6}, {srcDir[5]:F6})");
+        _progress.Report($"[ITK] Input dir[2]   : ({srcDir[6]:F6}, {srcDir[7]:F6}, {srcDir[8]:F6})");
 
         double outSx = srcSpacing[0];
         double outSy = srcSpacing[1];
@@ -134,8 +136,8 @@ public class SimpleItkResampler
         var outOrigin = new VectorDouble(aabbOrigin);
         var outSize = new VectorUInt32(gridSize);
 
-        Console.WriteLine($"[ITK] Output size    : {outSize[0]} x {outSize[1]} x {outSize[2]}");
-        Console.WriteLine($"[ITK] Output origin  : ({outOrigin[0]:F3}, {outOrigin[1]:F3}, {outOrigin[2]:F3})");
+        _progress.Report($"[ITK] Output size    : {outSize[0]} x {outSize[1]} x {outSize[2]}");
+        _progress.Report($"[ITK] Output origin  : ({outOrigin[0]:F3}, {outOrigin[1]:F3}, {outOrigin[2]:F3})");
 
         var identityDir = new VectorDouble(new double[] { 1, 0, 0, 0, 1, 0, 0, 0, 1 });
 
@@ -153,10 +155,10 @@ public class SimpleItkResampler
         src.Dispose();
 
         VectorDouble resDir = result.GetDirection();
-        Console.WriteLine($"[ITK] Result dir[0]  : ({resDir[0]:F6}, {resDir[1]:F6}, {resDir[2]:F6})");
-        Console.WriteLine($"[ITK] Result dir[1]  : ({resDir[3]:F6}, {resDir[4]:F6}, {resDir[5]:F6})");
-        Console.WriteLine($"[ITK] Result dir[2]  : ({resDir[6]:F6}, {resDir[7]:F6}, {resDir[8]:F6})");
-        Console.WriteLine("[ITK] Resampling complete.");
+        _progress.Report($"[ITK] Result dir[0]  : ({resDir[0]:F6}, {resDir[1]:F6}, {resDir[2]:F6})");
+        _progress.Report($"[ITK] Result dir[1]  : ({resDir[3]:F6}, {resDir[4]:F6}, {resDir[5]:F6})");
+        _progress.Report($"[ITK] Result dir[2]  : ({resDir[6]:F6}, {resDir[7]:F6}, {resDir[8]:F6})");
+        _progress.Report("[ITK] Resampling complete.");
 
         return result;
     }

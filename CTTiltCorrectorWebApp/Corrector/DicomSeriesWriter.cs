@@ -21,12 +21,15 @@ namespace DicomTiltCorrector
     {
         private readonly DicomSeriesLoader.SliceInfo[] _referenceSlices;
         private readonly string _correctedPatientPosition;
+        private readonly IProgress<string> _progress;
 
-        public DicomSeriesWriter(List<DicomSeriesLoader.SliceInfo> referenceSlices,
+        public DicomSeriesWriter(IProgress<string> progress,
+                                List<DicomSeriesLoader.SliceInfo> referenceSlices,
                                  string correctedPatientPosition = "HFS")
         {
             _referenceSlices = referenceSlices.ToArray();
             _correctedPatientPosition = correctedPatientPosition;
+            _progress = progress;
         }
 
         public List<DicomDataset> BuildDatasets(Image resampledVolume)
@@ -46,9 +49,9 @@ namespace DicomTiltCorrector
             double Sy = spacing[1];
             double Sz = spacing[2];
 
-            DicomWriterHelpers.VerifyIdentityDirection(dir);
+            DicomWriterHelpers.VerifyIdentityDirection(dir, _progress);
 
-            Console.WriteLine($"[Writer] {nz} slices  |  {nx}x{ny} px  |  dz = {Sz:F4} mm");
+            _progress.Report($"[Writer] {nz} slices  |  {nx}x{ny} px  |  dz = {Sz:F4} mm");
 
             var ref0 = _referenceSlices[0].Dataset;
 
@@ -62,17 +65,17 @@ namespace DicomTiltCorrector
 
             bool isSigned = (pixelRepr == 1);
 
-            Console.WriteLine($"[Writer] RescaleSlope={rescaleSlope}, RescaleIntercept={rescaleIntercept}");
+            _progress.Report($"[Writer] RescaleSlope={rescaleSlope}, RescaleIntercept={rescaleIntercept}");
 
             Image storedVolume;
             if (Math.Abs(rescaleSlope - 1.0) < 1e-9 && Math.Abs(rescaleIntercept) < 1e-9)
             {
-                Console.WriteLine("[Writer] Rescale is identity, skipping inverse transform.");
+                _progress.Report("[Writer] Rescale is identity, skipping inverse transform.");
                 storedVolume = SimpleITK.Cast(resampledVolume, PixelIDValueEnum.sitkFloat32);
             }
             else
             {
-                Console.WriteLine("[Writer] Applying inverse rescale to recover stored pixel values.");
+                _progress.Report("[Writer] Applying inverse rescale to recover stored pixel values.");
                 var shiftScale = new ShiftScaleImageFilter();
                 shiftScale.SetShift(-rescaleIntercept);
                 shiftScale.SetScale(1.0 / rescaleSlope);
@@ -99,7 +102,7 @@ namespace DicomTiltCorrector
             int originalSeriesNumber = ref0.GetSingleValueOrDefault(DicomTag.SeriesNumber, 0);
             string newSeriesNumber = (originalSeriesNumber + 1000).ToString();
 
-            Console.WriteLine($"[Writer] New SeriesInstanceUID: {newSeriesUID}");
+            _progress.Report($"[Writer] New SeriesInstanceUID: {newSeriesUID}");
 
             for (int z = 0; z < nz; z++)
             {
@@ -129,7 +132,7 @@ namespace DicomTiltCorrector
 
                 // 5. Build output dataset
                 var outDs = new DicomDataset();
-                DicomTagCopier.CopyNonGeometryTags(refDs, outDs);
+                DicomTagCopier.CopyNonGeometryTags(refDs, outDs, _progress);
 
                 // 6. Geometry tags
                 outDs.AddOrUpdate(DicomTag.ImageOrientationPatient,
@@ -194,11 +197,11 @@ namespace DicomTiltCorrector
                 results.Add(outDs);
 
                 if ((z + 1) % 25 == 0 || z == nz - 1)
-                    Console.WriteLine($"  [{z + 1}/{nz}]  IPP-Z = {ippZ:F3} mm");
+                    _progress.Report($"  [{z + 1}/{nz}]  IPP-Z = {ippZ:F3} mm");
             }
 
             castVolume.Dispose();
-            Console.WriteLine($"[Writer] Done. {nz} datasets built.");
+            _progress.Report($"[Writer] Done. {nz} datasets built.");
             return results;
         }
     }

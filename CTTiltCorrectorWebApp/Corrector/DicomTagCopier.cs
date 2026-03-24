@@ -38,7 +38,7 @@ public static class DicomTagCopier
     /// Copy all non-geometry, non-pixel tags from <paramref name="referenceDataset"/>
     /// to <paramref name="outputDataset"/>.
     /// </summary>
-    public static void CopyNonGeometryTags(DicomDataset referenceDataset, DicomDataset outputDataset)
+    public static void CopyNonGeometryTags(DicomDataset referenceDataset, DicomDataset outputDataset, IProgress<string> progress)
     {
         foreach (var item in referenceDataset)
         {
@@ -54,7 +54,7 @@ public static class DicomTagCopier
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"  [WARN] Could not copy tag {tag}: {ex.Message}");
+                progress.Report($"  [WARN] Could not copy tag {tag}: {ex.Message}");
             }
         }
     }

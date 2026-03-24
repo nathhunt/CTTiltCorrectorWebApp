@@ -7,11 +7,8 @@ namespace CTTiltCorrector.Corrector;
 
 public class TiltCorrector : ITiltCorrector
 {
-    private readonly ILogger<TiltCorrector> _logger;
-
-    public TiltCorrector(ILogger<TiltCorrector> logger)
+    public TiltCorrector()
     {
-        _logger = logger;
     }
 
     public async Task<List<DicomDataset>> CorrectAsync(
@@ -38,7 +35,7 @@ public class TiltCorrector : ITiltCorrector
         }
 
         // ── 3. Compute slice spacing ──────────────────────────────────────
-        double spacing = SliceSpacingCalculator.Compute(sortedSlices);
+        double spacing = SliceSpacingCalculator.Compute(sortedSlices, progress);
         progress.Report($"Slice spacing: {spacing:F4} mm");
 
         // ── 4. Derive corrected PatientPosition ───────────────────────────
@@ -53,7 +50,7 @@ public class TiltCorrector : ITiltCorrector
         Image corrected = await Task.Run(() =>
         {
             ct.ThrowIfCancellationRequested();
-            var resampler = new SimpleItkResampler();
+            var resampler = new SimpleItkResampler(progress);
             return resampler.Resample(sortedSlices, spacing);
         }, ct);
 
@@ -63,13 +60,12 @@ public class TiltCorrector : ITiltCorrector
         List<DicomDataset> results = await Task.Run(() =>
         {
             ct.ThrowIfCancellationRequested();
-            var writer = new DicomSeriesWriter(sortedSlices, correctedPos);
+            var writer = new DicomSeriesWriter(progress, sortedSlices, correctedPos);
             return writer.BuildDatasets(corrected);
         }, ct);
 
         corrected.Dispose();
 
-        progress.Report($"Done. {results.Count} corrected slices.");
         return results;
     }
 }

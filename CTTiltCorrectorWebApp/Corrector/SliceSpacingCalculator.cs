@@ -22,7 +22,7 @@ namespace CTTiltCorrector.Corrector;
 /// </summary>
 public static class SliceSpacingCalculator
 {
-    public static double Compute(IReadOnlyList<DicomSeriesLoader.SliceInfo> slices)
+    public static double Compute(IReadOnlyList<DicomSeriesLoader.SliceInfo> slices, IProgress<string> progress)
     {
         if (slices == null) throw new ArgumentNullException(nameof(slices));
         if (slices.Count == 0) throw new ArgumentException("Slice list is empty.", nameof(slices));
@@ -36,7 +36,7 @@ public static class SliceSpacingCalculator
                 double st = ds.GetSingleValue<double>(DicomTag.SliceThickness);
                 if (st > 0)
                 {
-                    Console.WriteLine($"[Spacing] Using SliceThickness tag: {st:F4} mm");
+                    progress.Report($"[Spacing] Using SliceThickness tag: {st:F4} mm");
                     return st;
                 }
             }
@@ -47,11 +47,11 @@ public static class SliceSpacingCalculator
         if (slices.Count >= 2)
         {
             double fallback = MedianPositionSpacing(slices);
-            Console.WriteLine($"[Spacing] SliceThickness absent — using median IPP gap: {fallback:F4} mm");
+            progress.Report($"[Spacing] SliceThickness absent — using median IPP gap: {fallback:F4} mm");
             return fallback;
         }
 
-        Console.WriteLine("[Spacing] Single slice, no SliceThickness — defaulting to 1.0 mm");
+        progress.Report("[Spacing] Single slice, no SliceThickness — defaulting to 1.0 mm");
         return 1.0;
     }
 
