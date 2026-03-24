@@ -20,18 +20,31 @@ public class CorrectionJobQueue
             FullMode     = BoundedChannelFullMode.Wait
         });
 
+    // Tracks series UIDs currently queued or being processed
+    private readonly HashSet<string> _activeSeries = new();
+    private readonly object _lock = new();
+
     public ChannelReader<QueuedJob> Reader => _channel.Reader;
 
     /// <summary>
     /// Enqueues a job. Awaits if the channel is full.
     /// Returns the <see cref="IProgress{T}"/> sink the UI should subscribe to.
     /// </summary>
-    public async Task EnqueueAsync(
+    public async Task<bool> EnqueueAsync(
         CorrectionJob job,
         CancellationToken ct = default)
     {
+        lock (_lock)
+        {
+            if (_activeSeries.Contains(job.SeriesInstanceUid))
+                return false;
+
+            _activeSeries.Add(job.SeriesInstanceUid);
+        }
+
         var queued = new QueuedJob(job, ct);
         await _channel.Writer.WriteAsync(queued, ct);
+        return true;
     }
 }
 

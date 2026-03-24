@@ -189,7 +189,16 @@
                 series.SeriesInstanceUid,
                 user);
 
-            await JobQueue.EnqueueAsync(job);
+            bool accepted = await JobQueue.EnqueueAsync(job);
+
+            if (!accepted)
+            {
+                Snackbar.Add(
+                    $"Series {TruncateUid(series.SeriesInstanceUid)} is already queued or being " +
+                    "processed. Please wait for the current job to complete.",
+                    Severity.Warning);
+                    return;
+            }
 
             Snackbar.Add(
                 $"Job queued for series {TruncateUid(series.SeriesInstanceUid)}. " +
