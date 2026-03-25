@@ -46,6 +46,33 @@ public class CorrectionJobQueue
         await _channel.Writer.WriteAsync(queued, ct);
         return true;
     }
+
+    /// <summary>
+    /// Fired when a job completes, fails, or is cancelled.
+    /// Subscribe in UI components to trigger re-renders.
+    /// </summary>
+    public event Action<string>? JobCompleted;
+
+    /// <summary>
+    /// Called by <see cref="CorrectionJobProcessor"/> when a job completes,
+    /// fails, or is cancelled — freeing the series for future submissions.
+    /// </summary>
+    public void MarkComplete(string seriesInstanceUid)
+    {
+        lock (_lock)
+            _activeSeries.Remove(seriesInstanceUid);
+        
+        JobCompleted?.Invoke(seriesInstanceUid);
+    }
+
+    /// <summary>
+    /// Returns true if the given series is currently queued or being processed.
+    /// </summary>
+    public bool IsActive(string seriesInstanceUid)
+    {
+        lock (_lock)
+            return _activeSeries.Contains(seriesInstanceUid);
+    }
 }
 
 // ─── Job wrapper ─────────────────────────────────────────────────────────────
@@ -113,6 +140,7 @@ public class CorrectionJobProcessor : BackgroundService
             }
             finally
             {
+                _queue.MarkComplete(queued.Job.SeriesInstanceUid);
                 _monitorState.SetJobFinished(queued.Job.UserName);
             }
         }

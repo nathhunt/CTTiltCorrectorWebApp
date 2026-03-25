@@ -1,4 +1,5 @@
 @page "/search"
+@implements IDisposable
 @inject DicomQueryService DicomQuery
 @inject CorrectionJobQueue JobQueue
 @inject IHttpContextAccessor HttpContextAccessor
@@ -95,7 +96,11 @@
                            Size="Size.Small"
                            StartIcon="@Icons.Material.Filled.Straighten"
                            OnClick="() => SubmitJobAsync(context)"
-                           Disabled="_submitting">
+                           Disabled="@(_submitting || JobQueue.IsActive(context.SeriesInstanceUid))">
+                           @if (JobQueue.IsActive(context.SeriesInstanceUid))
+                            {
+                                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                            }
                     Correct Tilt
                 </MudButton>
             </MudTd>
@@ -114,6 +119,24 @@
     private bool _submitting;
     private string? _errorMessage;
     private List<DicomSeriesResult>? _results;
+
+    protected override void OnInitialized()
+    {
+        // Subscribe to job completion so the button re-enables automatically
+        JobQueue.JobCompleted += OnJobCompleted;
+    }
+
+    private void OnJobCompleted(string seriesUid)
+    {
+        // JobCompleted fires from the background processor thread —
+        // InvokeAsync marshals StateHasChanged onto the Blazor render thread
+        InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        JobQueue.JobCompleted -= OnJobCompleted;
+    }
 
     private async Task OnKeyDown(KeyboardEventArgs e)
     {
