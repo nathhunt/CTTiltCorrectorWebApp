@@ -152,6 +152,7 @@ public class DicomQueryService
 
         ds.AddOrUpdate(DicomTag.PatientID, patientId);
         ds.AddOrUpdate(DicomTag.PatientName, string.Empty);
+        ds.AddOrUpdate(DicomTag.PatientBirthDate, string.Empty);
         ds.AddOrUpdate(DicomTag.StudyInstanceUID, string.Empty);
         ds.AddOrUpdate(DicomTag.SeriesInstanceUID, string.Empty);
         ds.AddOrUpdate(DicomTag.SeriesDescription, string.Empty);
