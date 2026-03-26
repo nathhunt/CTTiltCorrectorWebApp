@@ -34,67 +34,46 @@ public class AdAuthService
     /// group membership if <see cref="AppConfig.AllowedAdGroups"/> is non-empty.
     /// Returns the fully qualified username (DOMAIN\username) on success.
     /// </summary>
-    public (AuthResult Result, string? FullUserName) Validate(string username, string password)
+    public (AuthResult Result, string? FullUserName, List<string> Groups) Validate(string username, string password)
     {
+        var groups = new List<string>();
         if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
-            return (AuthResult.InvalidCredentials, null);
+            return (AuthResult.InvalidCredentials, null, groups);
 
         try
         {
             using var context = new PrincipalContext(
-                    ContextType.Domain,
-                    _cfg.LdapServer,      
-                    null,                 // Leave container null to use the default root
-                    ContextOptions.Negotiate | ContextOptions.Signing | ContextOptions.Sealing);
+                ContextType.Domain,
+                _cfg.LdapServer,
+                null,
+                ContextOptions.Negotiate | ContextOptions.Signing | ContextOptions.Sealing);
 
-            // Validate credentials
-            bool credentialsValid = context.ValidateCredentials(username, password);
-            if (!credentialsValid)
-                return (AuthResult.InvalidCredentials, null);
+            if (!context.ValidateCredentials(username, password))
+                return (AuthResult.InvalidCredentials, null, groups);
 
-            // Retrieve the user principal
             using var user = UserPrincipal.FindByIdentity(context, username);
-            if (user is null)
-                return (AuthResult.InvalidCredentials, null);
+            if (user == null) return (AuthResult.InvalidCredentials, null, groups);
+            if (!user.Enabled ?? false) return (AuthResult.AccountDisabled, null, groups);
 
-            if (!user.Enabled ?? false)
-                return (AuthResult.AccountDisabled, null);
-
-            var fullUserName = $"{_cfg.Domain}\\{username}";
-
-            // Check group membership if groups are configured
-            if (_cfg.AllowedAdGroups.Count > 0)
+            // --- FETCH GROUPS ---
+            // GetAuthorizationGroups handles nested/recursive groups
+            foreach (var group in user.GetAuthorizationGroups())
             {
-                bool inGroup = _cfg.AllowedAdGroups.Any(groupName =>
+                if (!string.IsNullOrEmpty(group.Name))
                 {
-                    try
-                    {
-                        // Strip domain prefix if present (e.g. "HOSPITAL\GroupName" → "GroupName")
-                        var bare = groupName.Contains('\\')
-                            ? groupName.Split('\\', 2)[1]
-                            : groupName;
-
-                        using var group = GroupPrincipal.FindByIdentity(context, bare);
-                        return group is not null && user.IsMemberOf(group);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to check group membership for {Group}", groupName);
-                        return false;
-                    }
-                });
-
-                if (!inGroup)
-                    return (AuthResult.NotInRequiredGroup, null);
+                    // Add both "GroupName" and "DOMAIN\GroupName" formats
+                    groups.Add(group.Name);
+                    groups.Add($"{_cfg.Domain}\\{group.Name}");
+                }
             }
 
-            _logger.LogInformation("Auth success: {User}", fullUserName);
-            return (AuthResult.Success, fullUserName);
+            var fullUserName = $"{_cfg.Domain}\\{username}";
+            return (AuthResult.Success, fullUserName, groups);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "LDAP error during authentication for user {User}", username);
-            return (AuthResult.LdapError, null);
+            _logger.LogError(ex, "LDAP error for user {User}", username);
+            return (AuthResult.LdapError, null, groups);
         }
     }
 }
