@@ -1,7 +1,7 @@
 using CTTiltCorrector.Data;
 using CTTiltCorrector.Services;
 using CTTiltCorrector.Infrastructure;
-using Microsoft.AspNetCore.Authentication.Negotiate;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.EntityFrameworkCore;
 using MudBlazor.Services;
 using CTTiltCorrector.Corrector;
@@ -16,8 +16,17 @@ builder.Services.AddRazorPages();
 builder.Services.AddServerSideBlazor();
 
 // ─── Windows / Active Directory Authentication ───────────────────────────────
-builder.Services.AddAuthentication(NegotiateDefaults.AuthenticationScheme)
-    .AddNegotiate();
+builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+    .AddCookie(options =>
+    {
+        options.LoginPath = "/login";
+        options.LogoutPath = "/logout";
+        options.AccessDeniedPath = "/login";
+        options.ExpireTimeSpan = TimeSpan.FromHours(8);
+        options.SlidingExpiration = true;
+        options.Cookie.HttpOnly = true;
+        options.Cookie.SameSite = SameSiteMode.Strict;
+    });
 
 var allowedGroups = builder.Configuration
     .GetSection("App:AllowedAdGroups")
@@ -28,7 +37,7 @@ builder.Services.AddAuthorization(options =>
     if (allowedGroups.Count > 0)
     {
         // User must be authenticated AND belong to at least one of the listed groups
-        options.DefaultPolicy = new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder()
+        options.FallbackPolicy = new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder()
             .RequireAuthenticatedUser()
             .RequireRole(allowedGroups.ToArray())
             .Build();
@@ -36,12 +45,10 @@ builder.Services.AddAuthorization(options =>
     else
     {
         // No groups configured — require authentication only (useful during development)
-        options.DefaultPolicy = new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder()
+        options.FallbackPolicy = new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder()
             .RequireAuthenticatedUser()
             .Build();
     }
-
-    options.FallbackPolicy = options.DefaultPolicy;
 });
 
 // ─── Configuration ───────────────────────────────────────────────────────────

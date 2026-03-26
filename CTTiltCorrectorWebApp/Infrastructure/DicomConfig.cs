@@ -48,8 +48,20 @@ public class AppConfig
     public string LogRootPath { get; set; } = "logs/corrections";
 
     /// <summary>
-    /// Active Directory group whose members are allowed to use the application.
-    /// Format: DOMAIN\\GroupName
+    /// Active Directory domain name (e.g. "HOSPITAL").
+    /// Users log in with username only — the domain is prepended automatically.
     /// </summary>
-    public List<string> AllowedAdGroups { get; set; } = [];
+    public string Domain { get; set; } = "DOMAIN";
+
+    /// <summary>
+    /// Hostname or IP of a domain controller reachable via LDAP (port 389).
+    /// </summary>
+    public string LdapServer { get; set; } = "192.168.1.10";
+
+    /// <summary>
+    /// AD groups allowed to access the app. User must be in at least one.
+    /// Leave empty to allow any authenticated domain user.
+    /// </summary>
+    public List<string> AllowedAdGroups { get; set; } = new();
 }
+

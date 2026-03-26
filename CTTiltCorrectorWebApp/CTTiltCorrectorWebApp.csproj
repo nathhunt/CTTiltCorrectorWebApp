@@ -24,7 +24,8 @@
     </PackageReference>
 
     <!-- Windows / Active Directory Authentication -->
-    <PackageReference Include="Microsoft.AspNetCore.Authentication.Negotiate" Version="8.*" />
+	  <PackageReference Include="Microsoft.AspNetCore.Authentication.Cookies" Version="2.*" />
+	  <PackageReference Include="System.DirectoryServices.AccountManagement" Version="8.*" />
   </ItemGroup>
 
 	<ItemGroup>

@@ -1,0 +1,183 @@
+﻿@page
+@model CTTiltCorrector.Pages.LoginModel
+@{
+    Layout = "_Layout";
+}
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Login — CT Tilt Corrector</title>
+    <link href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700&display=swap" rel="stylesheet" />
+    <link href="_content/MudBlazor/MudBlazor.min.css" rel="stylesheet" />
+    <style>
+        body {
+            margin: 0;
+            background: #0a0a0a;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            font-family: 'Roboto', sans-serif;
+        }
+
+        .login-card {
+            background: #1a1a1a;
+            border: 1px solid #2a2a2a;
+            border-radius: 12px;
+            padding: 48px;
+            width: 100%;
+            max-width: 400px;
+            box-shadow: 0 24px 64px rgba(0,0,0,0.6);
+        }
+
+        .login-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 32px;
+        }
+
+        .login-icon {
+            width: 40px;
+            height: 40px;
+            background: #f5a623;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .login-title {
+            color: #ffffff;
+            font-size: 1.25rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            margin: 0;
+        }
+
+        .login-subtitle {
+            color: #6b7280;
+            font-size: 0.8rem;
+            margin: 0;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            color: #9ca3af;
+            font-size: 0.8rem;
+            margin-bottom: 6px;
+            letter-spacing: 0.05em;
+        }
+
+        input {
+            width: 100%;
+            padding: 10px 14px;
+            background: #0d1117;
+            border: 1px solid #2a2a2a;
+            border-radius: 6px;
+            color: #e5e7eb;
+            font-size: 0.95rem;
+            font-family: inherit;
+            box-sizing: border-box;
+            transition: border-color 0.15s;
+            outline: none;
+        }
+
+            input:focus {
+                border-color: #0070f3;
+            }
+
+        .error-message {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            border-radius: 6px;
+            color: #f87171;
+            font-size: 0.85rem;
+            padding: 10px 14px;
+            margin-bottom: 20px;
+        }
+
+        button[type="submit"] {
+            width: 100%;
+            padding: 11px;
+            background: #0070f3;
+            border: none;
+            border-radius: 6px;
+            color: white;
+            font-size: 0.95rem;
+            font-weight: 600;
+            font-family: inherit;
+            cursor: pointer;
+            transition: background 0.15s;
+            margin-top: 8px;
+        }
+
+            button[type="submit"]:hover {
+                background: #0060d0;
+            }
+
+        .domain-hint {
+            color: #4b5563;
+            font-size: 0.75rem;
+            margin-top: 16px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-card">
+        <div class="login-header">
+            <div class="login-icon">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0a0a0a" stroke-width="2.5">
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="12" y1="8" x2="12" y2="12" />
+                    <line x1="12" y1="16" x2="12.01" y2="16" />
+                </svg>
+            </div>
+            <div>
+                <p class="login-subtitle">Clinical Imaging</p>
+                <h1 class="login-title">CT Tilt Corrector</h1>
+            </div>
+        </div>
+
+        @if (!string.IsNullOrEmpty(Model.ErrorMessage))
+        {
+            <div class="error-message">@Model.ErrorMessage</div>
+        }
+
+        <form method="post">
+            @Html.AntiForgeryToken()
+            <div class="form-group">
+                <label for="username">Username</label>
+                <input type="text"
+                       id="username"
+                       name="username"
+                       value="@Model.Username"
+                       autocomplete="username"
+                       autofocus
+                       placeholder="e.g. jsmith" />
+            </div>
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password"
+                       id="password"
+                       name="password"
+                       autocomplete="current-password"
+                       placeholder="Domain password" />
+            </div>
+            <button type="submit">Sign In</button>
+        </form>
+
+        <p class="domain-hint">Sign in with your @Model.DomainName domain credentials</p>
+    </div>
+</body>
+</html>
