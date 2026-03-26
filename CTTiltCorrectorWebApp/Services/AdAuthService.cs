@@ -42,9 +42,10 @@ public class AdAuthService
         try
         {
             using var context = new PrincipalContext(
-                ContextType.Domain,
-                _cfg.LdapServer,
-                _cfg.Domain);
+                    ContextType.Domain,
+                    _cfg.LdapServer,      
+                    null,                 // Leave container null to use the default root
+                    ContextOptions.Negotiate | ContextOptions.Signing | ContextOptions.Sealing);
 
             // Validate credentials
             bool credentialsValid = context.ValidateCredentials(username, password);

@@ -9,6 +9,7 @@ using System.Security.Claims;
 
 namespace CTTiltCorrector.Pages;
 
+[Microsoft.AspNetCore.Authorization.AllowAnonymous]
 public class LoginModel : PageModel
 {
     private readonly AdAuthService _authService;

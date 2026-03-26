@@ -85,6 +85,7 @@ builder.Services.AddScoped<ITiltCorrector, TiltCorrector>();
 builder.Services.AddScoped<DicomQueryService>();
 builder.Services.AddScoped<CorrectionService>();
 builder.Services.AddScoped<HistoryService>();
+builder.Services.AddScoped<AdAuthService>();
 builder.Services.AddSingleton<MonitorState>();
 
 // ─── HttpContextAccessor (for resolving current Windows user in Blazor) ───────
