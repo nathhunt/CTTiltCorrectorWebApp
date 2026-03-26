@@ -15,7 +15,7 @@
 
 <MudPaper Class="pa-4 mb-4" Elevation="2">
     <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
-        
+
         <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="3" Style="width: fit-content">
             <MudTextField @bind-Value="_patientId"
                           Label="Patient ID (MRN)"
@@ -97,10 +97,10 @@
                            StartIcon="@Icons.Material.Filled.Straighten"
                            OnClick="() => SubmitJobAsync(context)"
                            Disabled="@(_submitting || JobQueue.IsActive(context.SeriesInstanceUid))">
-                           @if (JobQueue.IsActive(context.SeriesInstanceUid))
-                            {
-                                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
-                            }
+                    @if (JobQueue.IsActive(context.SeriesInstanceUid))
+                    {
+                        <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                    }
                     Correct Tilt
                 </MudButton>
             </MudTd>
@@ -140,7 +140,7 @@
 
     private async Task OnKeyDown(KeyboardEventArgs e)
     {
-        if (e.Key == "Enter") 
+        if (e.Key == "Enter")
         {
             await SearchAsync();
         }
@@ -151,52 +151,32 @@
             _patientName = string.Empty;
             _patientDOB = string.Empty;
         }
-
     }
 
-    // private async Task SearchAsync()
-    // {
-    //     if (string.IsNullOrWhiteSpace(_patientId)) return;
-    //     _errorMessage = null;
-    //     _results = null;
-    //     _searching = true;
-    //     try
-    //     {
-    //         var res = await DicomQuery.FindSeriesAsync(_patientId.Trim());
-    //         _results = res.ToList();
-    //         if (_results.Count > 0)
-    //         {
-    //             _patientName = _results[0].PatientName;
-    //             _patientDOB = _results[0].PatientDOB;
-    //         }
-    //     }
-    //     catch (Exception ex)
-    //     {
-    //         _errorMessage = $"Query failed: {ex.Message}";
-    //     }
-    //     finally
-    //     {
-    //         _searching = false;
-    //     }
-    // }
-
-    // Test stub for UI.
     private async Task SearchAsync()
     {
         if (string.IsNullOrWhiteSpace(_patientId)) return;
         _errorMessage = null;
         _results = null;
         _searching = true;
-
-        await Task.Delay(500);
-        _results = new List<DicomSeriesResult>
+        try
         {
-            new("asd123", "Smith^John", "19620314", "1.2.840.10008.1", "1.2.840.10008.1.1", "HEAD ROUTINE", "CT", "20240315", 300),
-            new("asd123", "Smith^John", "19620314", "1.2.840.10008.1", "1.2.840.10008.1.2", "CHEST CT", "CT", "20240315", 200),
-        };
-        _patientName = "Smith^John";
-        _patientDOB = "19620314";
-        _searching = false;
+            var (patient, series) = await DicomQuery.FindAsync(_patientId.Trim());
+            _results = series.ToList();
+            if (patient is not null)
+            {
+                _patientName = patient.PatientName;
+                _patientDOB = patient.PatientDob;
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Query failed: {ex.Message}";
+        }
+        finally
+        {
+            _searching = false;
+        }
     }
 
     private async Task SubmitJobAsync(DicomSeriesResult series)
@@ -221,7 +201,7 @@
                     $"Series {TruncateUid(series.SeriesInstanceUid)} is already queued or being " +
                     "processed. Please wait for the current job to complete.",
                     Severity.Warning);
-                    return;
+                return;
             }
 
             Snackbar.Add(
@@ -253,38 +233,27 @@
 
     private static string Initials(string dicomName)
     {
-        if (string.IsNullOrWhiteSpace(dicomName))
-            return "?";
-
-        // Take only the alphabetic component group (before any '=')
+        if (string.IsNullOrWhiteSpace(dicomName)) return "?";
         var alphabetic = dicomName.Split('=')[0];
-
-        // Split into components: Family^Given^Middle^Prefix^Suffix
         var parts = alphabetic.Split('^');
-
         var family = parts.ElementAtOrDefault(0)?.Trim();
         var given = parts.ElementAtOrDefault(1)?.Trim();
-
         return (string.IsNullOrEmpty(family), string.IsNullOrEmpty(given)) switch
         {
-            (false, false) => $"{given![0]}{family![0]}",   // JS  (John Smith)
-            (false, true) => $"{family![0]}",              // S   (family only)
-            (true, false) => $"{given![0]}",               // J   (given only)
-            _ => "?"                           // nothing usable
+            (false, false) => $"{given![0]}{family![0]}",
+            (false, true) => $"{family![0]}",
+            (true, false) => $"{given![0]}",
+            _ => "?"
         };
     }
 
     private static string FormatPatientName(string dicomName)
     {
-        if (string.IsNullOrWhiteSpace(dicomName))
-            return "Unknown";
-
+        if (string.IsNullOrWhiteSpace(dicomName)) return "Unknown";
         var alphabetic = dicomName.Split('=')[0];
         var parts = alphabetic.Split('^');
-
         var family = parts.ElementAtOrDefault(0)?.Trim();
         var given = parts.ElementAtOrDefault(1)?.Trim();
-
         return (string.IsNullOrEmpty(family), string.IsNullOrEmpty(given)) switch
         {
             (false, false) => $"{given!} {family!}",
