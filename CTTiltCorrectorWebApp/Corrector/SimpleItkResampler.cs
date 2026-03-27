@@ -85,21 +85,31 @@ public static class SimpleItkResampler
             }
         }
 
-        // ── 4. Import buffer into ITK as a float64 volume ─────────────────
-        Image src;
-        unsafe
+        // ── 4. Create scalar ITK image ───────────────
+
+        Image src = new Image((uint)nx, (uint)ny, (uint)nz, PixelIDValueEnum.sitkFloat64);
+
+        // Copy buffer into ITK image
+        for (int z = 0; z < nz; z++)
         {
-            fixed (double* ptr = volumeBuffer)
+            int sliceOffset = z * nx * ny;
+
+            for (int y = 0; y < ny; y++)
             {
-                var importFilter = new ImportImageFilter();
-                importFilter.SetSize(new VectorUInt32(new uint[] { (uint)nx, (uint)ny, (uint)nz }));
-                importFilter.SetSpacing(new VectorDouble(new double[] { sx, sy, sz }));
-                importFilter.SetOrigin(new VectorDouble(new double[] { ipp0[0], ipp0[1], ipp0[2] }));
-                importFilter.SetDirection(new VectorDouble(direction));
-                importFilter.SetBufferAsDouble((nint)ptr, (uint)((long)nx * ny * nz));
-                src = importFilter.Execute();
+                for (int x = 0; x < nx; x++)
+                {
+                    int i = y * nx + x;
+                    double value = volumeBuffer[sliceOffset + i];
+
+                    src.SetPixelAsDouble(new VectorUInt32(new uint[] { (uint)x, (uint)y, (uint)z }), value);
+                }
             }
         }
+
+        // Apply geometry
+        src.SetSpacing(new VectorDouble(new double[] { sx, sy, sz }));
+        src.SetOrigin(new VectorDouble(new double[] { ipp0[0], ipp0[1], ipp0[2] }));
+        src.SetDirection(new VectorDouble(direction));
 
         // ── 5. Report what ITK loaded ────────────────
         VectorDouble srcSpacing = src.GetSpacing();
@@ -120,7 +130,7 @@ public static class SimpleItkResampler
         double outSy = srcSpacing[1];
         double outSz = (forcedSliceSpacingMm > 0) ? forcedSliceSpacingMm : srcSpacing[2];
 
-        // ── 4. Compute output bounding box ─────────────────────────────────
+        // ── 7. Compute output bounding box ─────────────────────────────────
             //
             // The tilted input volume's axis-aligned bounding box (AABB) defines
             // the output extent.  We pass the full input geometry so that no
@@ -144,13 +154,13 @@ public static class SimpleItkResampler
         progress.Report($"[ITK] Output size    : {outSize[0]} x {outSize[1]} x {outSize[2]}");
         progress.Report($"[ITK] Output origin  : ({outOrigin[0]:F3}, {outOrigin[1]:F3}, {outOrigin[2]:F3})");
 
-        // ── 5. Identity direction ──────────────────────────────────────────
+        // ── 8. Identity direction ──────────────────────────────────────────
         //
         // The output volume is resampled into standard HFS axial orientation:
         // X → left-to-right, Y → posterior-to-anterior, Z → inferior-to-superior.
         var identityDir = new VectorDouble(new double[] { 1, 0, 0, 0, 1, 0, 0, 0, 1 });
 
-        // ── 6. Resample ────────────────────────────────────────────────────
+        // ── 9. Resample ────────────────────────────────────────────────────
         //
         // Linear interpolation is used to avoid aliasing artefacts at the
         // resampled voxel boundaries.  The default pixel value is set to the
