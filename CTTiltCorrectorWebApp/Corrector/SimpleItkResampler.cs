@@ -89,8 +89,10 @@ public static class SimpleItkResampler
 
         Image src = new Image((uint)nx, (uint)ny, (uint)nz, PixelIDValueEnum.sitkFloat64);
 
+        var options = new ParallelOptions { MaxDegreeOfParallelism = 6 };
+
         // Copy buffer into ITK image
-        for (int z = 0; z < nz; z++)
+        Parallel.For(0, nz, options, z =>
         {
             int sliceOffset = z * nx * ny;
 
@@ -104,7 +106,7 @@ public static class SimpleItkResampler
                     src.SetPixelAsDouble(new VectorUInt32(new uint[] { (uint)x, (uint)y, (uint)z }), value);
                 }
             }
-        }
+        });
 
         // Apply geometry
         src.SetSpacing(new VectorDouble(new double[] { sx, sy, sz }));
