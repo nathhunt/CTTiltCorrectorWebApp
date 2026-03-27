@@ -52,30 +52,41 @@ public class DicomQueryService
     private static readonly HashSet<string> ExcludedSopClasses = new()
     {
         // RT Storage
-        "1.2.840.10008.5.1.4.1.1.481.1",    // RT Image Storage (DRR)
-        "1.2.840.10008.5.1.4.1.1.481.2",    // RT Dose Storage
-        "1.2.840.10008.5.1.4.1.1.481.3",    // RT Structure Set Storage
-        "1.2.840.10008.5.1.4.1.1.481.4",    // RT Beams Treatment Record
-        "1.2.840.10008.5.1.4.1.1.481.5",    // RT Plan Storage
-        "1.2.840.10008.5.1.4.1.1.481.6",    // RT Brachy Treatment Record
-        "1.2.840.10008.5.1.4.1.1.481.7",    // RT Treatment Summary Record
-        "1.2.840.10008.5.1.4.1.1.481.8",    // RT Ion Plan Storage
-        "1.2.840.10008.5.1.4.1.1.481.9",    // RT Ion Beams Treatment Record
-        "1.2.840.10008.5.1.4.34.7",         // RT Beams Delivery Instruction
+        DicomUID.RTImageStorage.UID,
+        DicomUID.RTDoseStorage.UID,
+        DicomUID.RTStructureSetStorage.UID,
+        DicomUID.RTBeamsTreatmentRecordStorage.UID,
+        DicomUID.RTPlanStorage.UID,
+        DicomUID.RTBrachyTreatmentRecordStorage.UID,
+        DicomUID.RTTreatmentSummaryRecordStorage.UID,
+        DicomUID.RTIonPlanStorage.UID,
+        DicomUID.RTIonBeamsTreatmentRecordStorage.UID,
+        DicomUID.RTBeamsDeliveryInstructionStorage.UID,
+
+        // Registrations
+        DicomUID.SpatialRegistrationStorage.UID,
+        DicomUID.DeformableSpatialRegistrationStorage.UID,
+
+        // Motion Management
+        "1.2.246.352.70.1.40",    // Varian Motion Management Protocol
+        "1.2.246.352.70.1.41",    // Varian Motion Management Waveform
+    
         // Dose / SR
-        "1.2.840.10008.5.1.4.1.1.88.67",    // X-Ray Radiation Dose SR
+        DicomUID.XRayRadiationDoseSRStorage.UID,
         "1.2.840.10008.5.1.4.1.1.88.68",    // Radiopharmaceutical Radiation Dose SR
         "1.2.840.10008.5.1.4.1.1.88.69",    // CT Radiation Dose SR
         "1.2.840.10008.5.1.4.1.1.88.71",    // Radiotherapy Radiation Dose SR
+    
         // Secondary captures
-        "1.2.840.10008.5.1.4.1.1.7",        // Secondary Capture Image Storage
-        "1.2.840.10008.5.1.4.1.1.7.1",
-        "1.2.840.10008.5.1.4.1.1.7.2",
-        "1.2.840.10008.5.1.4.1.1.7.3",
-        "1.2.840.10008.5.1.4.1.1.7.4",
+        DicomUID.SecondaryCaptureImageStorage.UID,
+        "1.2.840.10008.5.1.4.1.1.7.1",      // Multiframe Single Bit SC
+        "1.2.840.10008.5.1.4.1.1.7.2",      // Multiframe Grayscale Byte SC
+        "1.2.840.10008.5.1.4.1.1.7.3",      // Multiframe Grayscale Word SC
+        "1.2.840.10008.5.1.4.1.1.7.4",      // Multiframe True Color SC
+    
         // Presentation states
-        "1.2.840.10008.5.1.4.1.1.11.1",     // Grayscale Softcopy Presentation State
-        "1.2.840.10008.5.1.4.1.1.11.2",     // Color Softcopy Presentation State
+        DicomUID.GrayscaleSoftcopyPresentationStateStorage.UID,
+        DicomUID.ColorSoftcopyPresentationStateStorage.UID,
     };
 
     // ─── Public API ───────────────────────────────────────────────────────────
