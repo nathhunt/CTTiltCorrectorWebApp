@@ -37,7 +37,7 @@ public class DicomStoreScp : IHostedService
 
         _server = DicomServerFactory.Create<CStoreScp>(
             _cfg.LocalPort,
-            userState: new ScpContext(_cfg, _logger, _store));
+            userState: new ScpContext(_cfg, _logger, _store)); // Ensure this isn't null
 
         return Task.CompletedTask;
     }
@@ -65,72 +65,108 @@ public class CStoreScp : DicomService, IDicomServiceProvider, IDicomCStoreProvid
         DicomTransferSyntax.ExplicitVRBigEndian,
     };
 
-    private readonly ScpContext _ctx;
+    private ScpContext? _ctx;
 
     public CStoreScp(INetworkStream stream, Encoding fallbackEncoding,
         ILogger log, DicomServiceDependencies deps)
         : base(stream, fallbackEncoding, log, deps)
     {
-        _ctx = (ScpContext)UserState!;
+        // We will extract UserState in the methods to ensure it's populated.
+    }
+
+    private void EnsureContext()
+    {
+        if (_ctx == null && UserState != null)
+        {
+            _ctx = (ScpContext)UserState;
+        }
     }
 
     public Task OnReceiveAssociationRequestAsync(DicomAssociation association)
     {
+        EnsureContext();
+        _ctx?.Logger.LogInformation("Association received from {CallingAe} for {CalledAe}",
+            association.CallingAE, association.CalledAE);
+
         foreach (var pc in association.PresentationContexts)
-            foreach (var ts in AcceptedSyntaxes)
-                pc.SetResult(DicomPresentationContextResult.Accept, ts);
+        {
+            // Explicitly accept CT Image Storage (Standard CT)
+            if (pc.AbstractSyntax == DicomUID.CTImageStorage ||
+                pc.AbstractSyntax == DicomUID.Verification)
+            {
+                pc.AcceptTransferSyntaxes(AcceptedSyntaxes);
+            }
+            else
+            {
+                // Accept other objects (RTStruct, Registration) just in case ARIA sends them
+                pc.AcceptTransferSyntaxes(AcceptedSyntaxes);
+            }
+        }
 
         return SendAssociationAcceptAsync(association);
     }
 
-    public Task OnReceiveAssociationReleaseRequestAsync()
-        => SendAssociationReleaseResponseAsync();
-
-    public void OnReceiveAbort(DicomAbortSource source, DicomAbortReason reason)
-        => _ctx.Logger.LogWarning("DICOM abort — Source={S} Reason={R}", source, reason);
-
-    public void OnConnectionClosed(Exception? exception)
-    {
-        if (exception is not null)
-            _ctx.Logger.LogError(exception, "DICOM connection closed with error.");
-    }
-
-    /// <summary>
-    /// Clones each incoming dataset into the in-memory store.
-    /// The clone decouples the dataset from the underlying network buffer
-    /// so it remains valid after the association closes.
-    /// </summary>
     public Task<DicomCStoreResponse> OnCStoreRequestAsync(DicomCStoreRequest request)
     {
+        EnsureContext();
+
+        if (_ctx == null)
+        {
+            return Task.FromResult(new DicomCStoreResponse(request, DicomStatus.ProcessingFailure));
+        }
+
         try
         {
-            var seriesUid = request.Dataset
-                .GetSingleValueOrDefault(DicomTag.SeriesInstanceUID, "UnknownSeries");
+            if (request.Dataset == null)
+            {
+                _ctx.Logger.LogWarning("Received C-STORE request with null dataset.");
+                return Task.FromResult(new DicomCStoreResponse(request, DicomStatus.ProcessingFailure));
+            }
 
+            // Simplified: Just pull the Series UID directly from the dataset
+            var seriesUid = request.Dataset.GetSingleValueOrDefault(DicomTag.SeriesInstanceUID, "UnknownSeries");
+
+            // Clone the dataset so it lives in memory after the connection closes
             var accepted = _ctx.Store.Add(seriesUid, request.Dataset.Clone());
 
             if (accepted)
-                _ctx.Logger.LogDebug(
-                    "C-STORE received SOP={Sop} Series={Series}",
+            {
+                _ctx.Logger.LogDebug("C-STORE received SOP={Sop} Series={Series}",
                     request.SOPInstanceUID.UID, seriesUid);
+            }
             else
-                _ctx.Logger.LogWarning(
-                    "C-STORE dropped unexpected SOP={Sop} Series={Series} — not registered",
-                    request.SOPInstanceUID.UID, seriesUid);
+            {
+                _ctx.Logger.LogWarning("C-STORE dropped unexpected Series={Series}. Check your .Expect() call.", seriesUid);
+            }
 
             return Task.FromResult(new DicomCStoreResponse(request, DicomStatus.Success));
         }
         catch (Exception ex)
         {
-            _ctx.Logger.LogError(ex, "C-STORE handler faulted.");
-            return Task.FromResult(
-                new DicomCStoreResponse(request, DicomStatus.ProcessingFailure));
+            _ctx.Logger.LogError(ex, "C-STORE handler faulted while processing slice.");
+            return Task.FromResult(new DicomCStoreResponse(request, DicomStatus.ProcessingFailure));
         }
+    }
+
+    public Task OnReceiveAssociationReleaseRequestAsync() => SendAssociationReleaseResponseAsync();
+
+    public void OnReceiveAbort(DicomAbortSource source, DicomAbortReason reason)
+    {
+        EnsureContext();
+        _ctx?.Logger.LogWarning("DICOM abort — Source={S} Reason={R}", source, reason);
+    }
+
+    public void OnConnectionClosed(Exception? exception)
+    {
+        EnsureContext();
+        if (exception is not null)
+            _ctx?.Logger.LogError(exception, "DICOM connection closed with error.");
     }
 
     public Task OnCStoreRequestExceptionAsync(string tempFileName, Exception e)
     {
-        _ctx.Logger.LogError(e, "C-STORE exception.");
+        EnsureContext();
+        _ctx?.Logger.LogError(e, "C-STORE network exception.");
         return Task.CompletedTask;
     }
 }

@@ -148,13 +148,6 @@ public class DicomQueryService
                 ? series.SeriesDescription
                 : descFallback;
 
-            if (string.IsNullOrEmpty(description))
-            {
-                _logger.LogDebug(
-                    "Excluded series {Uid} — no description at any level", series.SeriesInstanceUid);
-                continue;
-            }
-
             verified.Add(series with
             {
                 NumberOfImages = actualCount,
@@ -197,20 +190,21 @@ public class DicomQueryService
         {
             if (response.Status == DicomStatus.Pending)
             {
-                progress?.Report(
-                    $"C-MOVE in progress — {response.Completed} received, {response.Remaining} remaining…");
+                progress?.Report($"C-MOVE in progress — {response.Completed} received, {response.Remaining} remaining…");
             }
-            else if (response.Status == DicomStatus.Success)
+            // Change: Treat Success OR Warning as a completion of the Move operation
+            else if (response.Status == DicomStatus.Success ||
+                     response.Status.State == DicomState.Warning)
             {
                 tcs.TrySetResult(true);
                 progress?.Report(
                     $"C-MOVE complete — {response.Completed} images, " +
-                    $"{response.Warnings} warnings, {response.Failures} failures.");
+                    $"{response.Warnings} warnings, {response.Failures} failures. (Status: {response.Status})");
             }
             else
             {
-                var msg = $"C-MOVE ended with status: {response.Status}";
-                _logger.LogWarning(msg);
+                var msg = $"C-MOVE ended with failure status: {response.Status}";
+                _logger.LogError(msg);
                 tcs.TrySetException(new InvalidOperationException(msg));
             }
         };
@@ -409,7 +403,8 @@ public class DicomQueryService
         var desc = s.SeriesDescription.ToUpperInvariant();
 
         if (desc.Contains("4DCT") ||
-            desc.Contains("RESPIRATORY"))      // RT planning phase series pattern
+            desc.Contains("RESPIRATORY") ||
+            desc.Contains("CBCT"))
             return false;
 
         return true;

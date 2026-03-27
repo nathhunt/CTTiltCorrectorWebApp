@@ -46,11 +46,33 @@ public class TiltCorrector : ITiltCorrector
         // ── 5. Resample ───────────────────────────────────────────────────
         progress.Report("Resampling to HFS identity orientation…");
 
-        Image corrected = await Task.Run(() =>
+        Image corrected;
+        try
         {
-            ct.ThrowIfCancellationRequested();
-            return SimpleItkResampler.Resample(sortedSlices, progress, spacing);
-        }, ct);
+            corrected = await Task.Run(() =>
+            {
+                ct.ThrowIfCancellationRequested();
+                // This is where the heavy lifting and potential SimpleITK errors happen
+                return SimpleItkResampler.Resample(sortedSlices, progress, spacing);
+            }, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            progress.Report("Resampling cancelled by user.");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Catch SimpleITK ApplicationExceptions or memory access errors
+            var errorMessage = $"[ERROR] Resampling failed: {ex.Message}";
+            progress.Report(errorMessage);
+
+            // Log the full stack trace for debugging at WRCC
+            Console.WriteLine($"{errorMessage}\n{ex.StackTrace}");
+
+            // Rethrow or return null depending on how your UI handles failures
+            throw new Exception(errorMessage, ex);
+        }
 
         // ── 6. Build output datasets ──────────────────────────────────────
         progress.Report("Building output datasets…");
