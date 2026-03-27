@@ -17,6 +17,8 @@ public enum AuthResult
 /// <summary>
 /// Validates domain credentials and AD group membership via LDAP.
 /// The host server does not need to be domain-joined.
+/// When Domain, LdapServer, and AllowedAdGroups are all blank/empty,
+/// the service bypasses LDAP and accepts any non-empty credentials.
 /// </summary>
 public class AdAuthService
 {
@@ -30,9 +32,19 @@ public class AdAuthService
     }
 
     /// <summary>
+    /// True only when all three AD fields are populated.
+    /// When false, Validate skips LDAP and accepts any non-empty credentials.
+    /// </summary>
+    public bool IsAdConfigured =>
+        !string.IsNullOrWhiteSpace(_cfg.Domain) &&
+        !string.IsNullOrWhiteSpace(_cfg.LdapServer) &&
+        _cfg.AllowedAdGroups?.Count > 0;
+
+    /// <summary>
     /// Validates the username and password against AD via LDAP, then checks
     /// group membership if <see cref="AppConfig.AllowedAdGroups"/> is non-empty.
     /// Returns the fully qualified username (DOMAIN\username) on success.
+    /// When AD is not configured, accepts any non-empty credentials immediately.
     /// </summary>
     public (AuthResult Result, string? FullUserName, List<string> Groups) Validate(string username, string password)
     {
@@ -40,6 +52,18 @@ public class AdAuthService
         if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
             return (AuthResult.InvalidCredentials, null, groups);
 
+        // ── Dev/unconfigured bypass ───────────────────────────────────────────
+        // When AD fields are blank, skip LDAP entirely. The authorization policy
+        // in Program.cs already requires auth-only (no role) in this case.
+        if (!IsAdConfigured)
+        {
+            _logger.LogWarning(
+                "AD not configured — accepting credentials for {User} without LDAP validation.",
+                username);
+            return (AuthResult.Success, username, groups);
+        }
+
+        // ── Full AD path ──────────────────────────────────────────────────────
         try
         {
             using var context = new PrincipalContext(
@@ -55,13 +79,10 @@ public class AdAuthService
             if (user == null) return (AuthResult.InvalidCredentials, null, groups);
             if (!user.Enabled ?? false) return (AuthResult.AccountDisabled, null, groups);
 
-            // --- FETCH GROUPS ---
-            // GetAuthorizationGroups handles nested/recursive groups
             foreach (var group in user.GetAuthorizationGroups())
             {
                 if (!string.IsNullOrEmpty(group.Name))
                 {
-                    // Add both "GroupName" and "DOMAIN\GroupName" formats
                     groups.Add(group.Name);
                     groups.Add($"{_cfg.Domain}\\{group.Name}");
                 }
