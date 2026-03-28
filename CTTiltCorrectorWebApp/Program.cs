@@ -82,7 +82,7 @@ builder.Services.AddHostedService<DicomStoreScp>();
 builder.Services.AddScoped<ITiltCorrector, TiltCorrector>();
 
 // ─── Application Services ────────────────────────────────────────────────────
-builder.Services.AddScoped<DicomQueryService>();
+builder.Services.AddScoped<IDicomQueryService, DicomQueryService>();
 builder.Services.AddScoped<CorrectionService>();
 builder.Services.AddScoped<HistoryService>();
 builder.Services.AddScoped<AdAuthService>();

@@ -24,9 +24,23 @@ public record DicomSeriesResult(
     string SeriesDate,
     int NumberOfImages);
 
+// ─── Interface ────────────────────────────────────────────────────────────────
+
+public interface IDicomQueryService
+{
+    Task<(DicomPatientResult? Patient, IReadOnlyList<DicomSeriesResult> Series)>
+        FindAsync(string patientId, CancellationToken ct = default);
+
+    Task MoveSeriesAsync(
+        string studyInstanceUid,
+        string seriesInstanceUid,
+        IProgress<string>? progress = null,
+        CancellationToken ct = default);
+}
+
 // ─── Service ─────────────────────────────────────────────────────────────────
 
-public class DicomQueryService
+public class DicomQueryService : IDicomQueryService
 {
     private readonly DicomConfig _cfg;
     private readonly ILogger<DicomQueryService> _logger;
@@ -409,7 +423,7 @@ public class DicomQueryService
     /// to avoid querying obviously non-diagnostic series.
     /// The image count check in the main pipeline is the definitive filter.
     /// </summary>
-    private static bool IsLikelyDiagnosticCt(DicomSeriesResult s)
+    internal static bool IsLikelyDiagnosticCt(DicomSeriesResult s)
     {
         var desc = s.SeriesDescription.ToUpperInvariant();
 

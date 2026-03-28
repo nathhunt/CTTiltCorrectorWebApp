@@ -60,7 +60,7 @@ public interface ITiltCorrector
 /// </summary>
 public class CorrectionService
 {
-    private readonly DicomQueryService _dicomQuery;
+    private readonly IDicomQueryService _dicomQuery;
     private readonly InMemoryDicomStore _store;
     private readonly ITiltCorrector _corrector;
     private readonly IDbContextFactory<AppDbContext> _dbFactory;
@@ -74,7 +74,7 @@ public class CorrectionService
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
 
     public CorrectionService(
-        DicomQueryService dicomQuery,
+        IDicomQueryService dicomQuery,
         InMemoryDicomStore store,
         ITiltCorrector corrector,
         IDbContextFactory<AppDbContext> dbFactory,
@@ -202,7 +202,7 @@ public class CorrectionService
     /// for <see cref="StableWindow"/>. Less precise but handles ARIA servers that
     /// report 0 or omit NumberOfSeriesRelatedInstances.
     /// </summary>
-    private async Task WaitForStableDeliveryAsync(
+    protected virtual async Task WaitForStableDeliveryAsync(
         string seriesUid,
         int expectedCount,
         IProgress<string> progress,
@@ -271,7 +271,7 @@ public class CorrectionService
     /// times on failure. Throws if all attempts are exhausted or if any individual
     /// slice response is non-Success, which causes the job to be marked Failed.
     /// </summary>
-    private async Task SendToAriaAsync(
+    protected virtual async Task SendToAriaAsync(
         List<DicomDataset> datasets,
         IProgress<string> combinedLogger,
         CancellationToken ct)
