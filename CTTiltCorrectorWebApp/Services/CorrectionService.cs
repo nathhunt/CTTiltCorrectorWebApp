@@ -69,9 +69,10 @@ public class CorrectionService
     private readonly AppConfig _appCfg;
     private readonly ILogger<CorrectionService> _logger;
 
-    // Polling: how long to wait for the slice count to stop growing
-    private static readonly TimeSpan StableWindow = TimeSpan.FromSeconds(5);
-    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
+    // Polling: how long to wait for the slice count to stop growing.
+    // Virtual so test subclasses can shorten the intervals without touching the algorithm.
+    protected virtual TimeSpan StableWindow  => TimeSpan.FromSeconds(5);
+    protected virtual TimeSpan PollInterval  => TimeSpan.FromSeconds(1);
 
     public CorrectionService(
         IDicomQueryService dicomQuery,
@@ -263,104 +264,108 @@ public class CorrectionService
     // ─── Step 6: send corrected datasets to ARIA ──────────────────────────────
 
     private const int MaxUploadAttempts = 3;
-    private static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(5);
+
+    // Virtual so test subclasses can eliminate the inter-retry pause.
+    protected virtual TimeSpan RetryDelay => TimeSpan.FromSeconds(5);
 
     /// <summary>
-    /// Opens a single DICOM association to ARIA and C-STOREs every corrected
-    /// dataset. Retries the entire association up to <see cref="MaxUploadAttempts"/>
-    /// times on failure. Throws if all attempts are exhausted or if any individual
-    /// slice response is non-Success, which causes the job to be marked Failed.
+    /// Retry wrapper: calls <see cref="SendAttemptAsync"/> up to
+    /// <see cref="MaxUploadAttempts"/> times. Throws after all attempts are
+    /// exhausted; propagates <see cref="OperationCanceledException"/> immediately.
     /// </summary>
-    protected virtual async Task SendToAriaAsync(
+    protected async Task SendToAriaAsync(
         List<DicomDataset> datasets,
-        IProgress<string> combinedLogger,
+        IProgress<string> progress,
         CancellationToken ct)
     {
-        int total = datasets.Count;
-
         for (int attempt = 1; attempt <= MaxUploadAttempts; attempt++)
         {
             ct.ThrowIfCancellationRequested();
 
             if (attempt > 1)
             {
-                combinedLogger.Report($"  ⏳ Retry {attempt}/{MaxUploadAttempts} in {RetryDelay.TotalSeconds}s…");
+                progress.Report($"  ⏳ Retry {attempt}/{MaxUploadAttempts} in {RetryDelay.TotalSeconds}s…");
                 await Task.Delay(RetryDelay, ct);
             }
 
-            var failures = new List<(int Index, DicomStatus Status)>();
-            int sent = 0;
-
             try
             {
-                var client = DicomClientFactory.Create(
-                    _dicomCfg.RemoteHost,
-                    _dicomCfg.RemotePort,
-                    useTls: false,
-                    callingAe: _dicomCfg.LocalAeTitle,
-                    calledAe: _dicomCfg.RemoteAeTitle);
-
-                client.ServiceOptions.RequestTimeout =
-                    TimeSpan.FromSeconds(_dicomCfg.ConnectionTimeoutSeconds);
-
-                foreach (var dataset in datasets)
-                {
-                    ct.ThrowIfCancellationRequested();
-
-                    var dicomFile = new DicomFile(dataset);
-                    var request = new DicomCStoreRequest(dicomFile);
-                    int capturedIndex = ++sent;
-
-                    request.OnResponseReceived += (_, response) =>
-                    {
-                        if (response.Status != DicomStatus.Success)
-                        {
-                            failures.Add((capturedIndex, response.Status));
-                            _logger.LogWarning(
-                                "C-STORE non-success slice {N}/{T}: {Status}",
-                                capturedIndex, total, response.Status);
-                        }
-                    };
-
-                    await client.AddRequestAsync(request);
-
-                    if (sent % 20 == 0 || sent == total)
-                        combinedLogger.Report($"  Queued {sent}/{total} slices for upload…");
-                }
-
-                await client.SendAsync(ct);
+                await SendAttemptAsync(datasets, progress, ct);
+                return; // success
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
             {
-                var msg = $"  ❌ Upload attempt {attempt}/{MaxUploadAttempts} failed: {ex.Message}";
-                combinedLogger.Report(msg);
+                progress.Report($"  ❌ Upload attempt {attempt}/{MaxUploadAttempts} failed: {ex.Message}");
                 _logger.LogError(ex, "Upload attempt {Attempt} failed.", attempt);
 
                 if (attempt == MaxUploadAttempts)
                     throw new InvalidOperationException(
                         $"Upload to ARIA failed after {MaxUploadAttempts} attempts. Last error: {ex.Message}", ex);
-
-                continue; // retry
             }
-
-            // Association succeeded — check for per-slice failures
-            if (failures.Count > 0)
-            {
-                var detail = string.Join(", ", failures.Select(f => $"slice {f.Index}: {f.Status}"));
-                var msg = $"  ❌ {failures.Count}/{total} slices rejected by ARIA: {detail}";
-                combinedLogger.Report(msg);
-
-                if (attempt == MaxUploadAttempts)
-                    throw new InvalidOperationException(
-                        $"{failures.Count}/{total} slices failed after {MaxUploadAttempts} attempts. {detail}");
-
-                continue; // retry
-            }
-
-            // All slices confirmed Success
-            combinedLogger.Report($"  ✅ Upload complete — {total}/{total} slices accepted by ARIA.");
-            return;
         }
+    }
+
+    /// <summary>
+    /// Opens a single DICOM association to ARIA and C-STOREs every corrected
+    /// dataset. Throws on any network failure or non-Success C-STORE response.
+    /// Virtual so test subclasses can replace the live DICOM client without a PACS.
+    /// </summary>
+    protected virtual async Task SendAttemptAsync(
+        List<DicomDataset> datasets,
+        IProgress<string> progress,
+        CancellationToken ct)
+    {
+        int total = datasets.Count;
+        var failures = new List<(int Index, DicomStatus Status)>();
+        int sent = 0;
+
+        var client = DicomClientFactory.Create(
+            _dicomCfg.RemoteHost,
+            _dicomCfg.RemotePort,
+            useTls: false,
+            callingAe: _dicomCfg.LocalAeTitle,
+            calledAe: _dicomCfg.RemoteAeTitle);
+
+        client.ServiceOptions.RequestTimeout =
+            TimeSpan.FromSeconds(_dicomCfg.ConnectionTimeoutSeconds);
+
+        foreach (var dataset in datasets)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var dicomFile = new DicomFile(dataset);
+            var request = new DicomCStoreRequest(dicomFile);
+            int capturedIndex = ++sent;
+
+            request.OnResponseReceived += (_, response) =>
+            {
+                if (response.Status != DicomStatus.Success)
+                {
+                    failures.Add((capturedIndex, response.Status));
+                    _logger.LogWarning(
+                        "C-STORE non-success slice {N}/{T}: {Status}",
+                        capturedIndex, total, response.Status);
+                }
+            };
+
+            await client.AddRequestAsync(request);
+
+            if (sent % 20 == 0 || sent == total)
+                progress.Report($"  Queued {sent}/{total} slices for upload…");
+        }
+
+        await client.SendAsync(ct);
+
+        if (failures.Count > 0)
+        {
+            var detail = string.Join(", ", failures.Select(f => $"slice {f.Index}: {f.Status}"));
+            progress.Report($"  ❌ {failures.Count}/{total} slices rejected by ARIA: {detail}");
+            throw new InvalidOperationException(
+                $"{failures.Count}/{total} slices rejected by ARIA: {detail}");
+        }
+
+        progress.Report($"  ✅ Upload complete — {total}/{total} slices accepted by ARIA.");
     }
 
     // ─── Helpers ──────────────────────────────────────────────────────────────

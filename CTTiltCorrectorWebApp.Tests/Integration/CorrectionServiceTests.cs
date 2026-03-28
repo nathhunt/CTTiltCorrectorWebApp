@@ -56,16 +56,20 @@ public class CorrectionServiceTests : IDisposable
 
     // ── Builder helpers ───────────────────────────────────────────────────────
 
-    private CorrectionService Build(bool skipWait = false) => new TestCorrectionService(
-        _queryMock.Object,
-        _store,
-        _correctorMock.Object,
-        _dbFactory,
-        _monitor,
-        Options.Create(new DicomConfig()),
-        Options.Create(new AppConfig { LogRootPath = _tempLogDir }),
-        NullLogger<CorrectionService>.Instance,
-        skipWait: skipWait);
+    private CorrectionService Build(
+        bool skipWait = false,
+        Func<CancellationToken, Task>? onSendAttempt = null) =>
+        new TestCorrectionService(
+            _queryMock.Object,
+            _store,
+            _correctorMock.Object,
+            _dbFactory,
+            _monitor,
+            Options.Create(new DicomConfig()),
+            Options.Create(new AppConfig { LogRootPath = _tempLogDir }),
+            NullLogger<CorrectionService>.Instance,
+            skipWait: skipWait,
+            onSendAttempt: onSendAttempt);
 
     private static CorrectionJob MakeJob(
         string seriesUid     = "1.2.3",
@@ -342,18 +346,222 @@ public class CorrectionServiceTests : IDisposable
 
         Directory.GetFiles(_tempLogDir, "*.log").Should().HaveCount(1);
     }
+
+    // ── Fallback stability-window path ────────────────────────────────────────
+
+    [Fact]
+    public async Task RunAsync_FallbackStabilityPath_DbStatusIsCompleted()
+    {
+        // expectedSlices = 0 triggers the stability-window fallback instead of
+        // the deterministic count-match path.
+        var job = MakeJob(expectedSlices: 0);
+        SetupMovePopulatesStore(job.SeriesInstanceUid, 2);
+        _correctorMock
+            .Setup(c => c.CorrectAsync(It.IsAny<List<DicomDataset>>(),
+                                       It.IsAny<IProgress<string>>(),
+                                       It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new DicomDataset()]);
+
+        await Build().RunAsync(job, CancellationToken.None);
+
+        var run = await ReadRunAsync(job.SeriesInstanceUid);
+        run!.Status.Should().Be("Completed");
+    }
+
+    [Fact]
+    public async Task RunAsync_DeterministicPath_WaitsForLateArrivingSlices()
+    {
+        // Two slices arrive immediately; the third is added by a background task
+        // after 100 ms. The polling loop (50 ms interval) must wait and detect it.
+        var job = MakeJob(expectedSlices: 3);
+
+        _queryMock
+            .Setup(q => q.MoveSeriesAsync(
+                It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<IProgress<string>?>(), It.IsAny<CancellationToken>()))
+            .Returns((string _, string _, IProgress<string>? _, CancellationToken _) =>
+            {
+                for (int i = 1; i <= 2; i++)
+                {
+                    var ds = new DicomDataset();
+                    ds.Add(DicomTag.InstanceNumber, i);
+                    _store.Add(job.SeriesInstanceUid, ds);
+                }
+                // Third slice arrives asynchronously after a short delay.
+                _ = Task.Run(async () =>
+                {
+                    await Task.Delay(100);
+                    var late = new DicomDataset();
+                    late.Add(DicomTag.InstanceNumber, 3);
+                    _store.Add(job.SeriesInstanceUid, late);
+                });
+                return Task.CompletedTask;
+            });
+
+        List<DicomDataset>? captured = null;
+        _correctorMock
+            .Setup(c => c.CorrectAsync(It.IsAny<List<DicomDataset>>(),
+                                       It.IsAny<IProgress<string>>(),
+                                       It.IsAny<CancellationToken>()))
+            .Callback<List<DicomDataset>, IProgress<string>, CancellationToken>(
+                (slices, _, _) => captured = slices.ToList())
+            .ReturnsAsync([new DicomDataset()]);
+
+        await Build().RunAsync(job, CancellationToken.None);
+
+        captured.Should().HaveCount(3);
+    }
+
+    // ── Upload retry logic ────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task RunAsync_UploadRetry_SucceedsOnSecondAttempt_DbStatusIsCompleted()
+    {
+        var job = MakeJob(expectedSlices: 2);
+        SetupMovePopulatesStore(job.SeriesInstanceUid, 2);
+        _correctorMock
+            .Setup(c => c.CorrectAsync(It.IsAny<List<DicomDataset>>(),
+                                       It.IsAny<IProgress<string>>(),
+                                       It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new DicomDataset()]);
+
+        int callCount = 0;
+        await Build(onSendAttempt: _ =>
+        {
+            if (++callCount == 1)
+                throw new InvalidOperationException("simulated network failure");
+            return Task.CompletedTask;
+        }).RunAsync(job, CancellationToken.None);
+
+        var run = await ReadRunAsync(job.SeriesInstanceUid);
+        run!.Status.Should().Be("Completed");
+        callCount.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task RunAsync_UploadRetry_ExhaustsAllAttempts_DbStatusIsFailed()
+    {
+        var job = MakeJob(expectedSlices: 2);
+        SetupMovePopulatesStore(job.SeriesInstanceUid, 2);
+        _correctorMock
+            .Setup(c => c.CorrectAsync(It.IsAny<List<DicomDataset>>(),
+                                       It.IsAny<IProgress<string>>(),
+                                       It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new DicomDataset()]);
+
+        int callCount = 0;
+        var sut = Build(onSendAttempt: _ =>
+        {
+            callCount++;
+            throw new InvalidOperationException("persistent network failure");
+        });
+
+        await sut.Invoking(s => s.RunAsync(job, CancellationToken.None))
+                 .Should().ThrowAsync<InvalidOperationException>()
+                 .WithMessage("*3 attempts*");
+
+        var run = await ReadRunAsync(job.SeriesInstanceUid);
+        run!.Status.Should().Be("Failed");
+        callCount.Should().Be(3);
+    }
+
+    // ── Cancellation at later pipeline stages ─────────────────────────────────
+
+    [Fact]
+    public async Task RunAsync_Cancellation_DuringWait_DbStatusIsCancelled()
+    {
+        // Move delivers only 1 slice; expected count is 3, so the polling loop
+        // keeps waiting. Cancel after 250 ms (≈ 5 poll ticks at 50 ms each).
+        var job = MakeJob(expectedSlices: 3);
+        _queryMock
+            .Setup(q => q.MoveSeriesAsync(
+                It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<IProgress<string>?>(), It.IsAny<CancellationToken>()))
+            .Returns((string _, string _, IProgress<string>? _, CancellationToken _) =>
+            {
+                var ds = new DicomDataset();
+                ds.Add(DicomTag.InstanceNumber, 1);
+                _store.Add(job.SeriesInstanceUid, ds);
+                return Task.CompletedTask;
+            });
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(250));
+        await Build().RunAsync(job, cts.Token);
+
+        var run = await ReadRunAsync(job.SeriesInstanceUid);
+        run!.Status.Should().Be("Cancelled");
+    }
+
+    [Fact]
+    public async Task RunAsync_Cancellation_DuringCorrect_DbStatusIsCancelled()
+    {
+        var job = MakeJob(expectedSlices: 2);
+        SetupMovePopulatesStore(job.SeriesInstanceUid, 2);
+        _correctorMock
+            .Setup(c => c.CorrectAsync(It.IsAny<List<DicomDataset>>(),
+                                       It.IsAny<IProgress<string>>(),
+                                       It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new OperationCanceledException());
+
+        // OperationCanceledException must be caught and NOT re-thrown.
+        await Build().Invoking(s => s.RunAsync(job, CancellationToken.None))
+                     .Should().NotThrowAsync();
+
+        var run = await ReadRunAsync(job.SeriesInstanceUid);
+        run!.Status.Should().Be("Cancelled");
+    }
+
+    [Fact]
+    public async Task RunAsync_Cancellation_DuringSend_DbStatusIsCancelled()
+    {
+        var job = MakeJob(expectedSlices: 2);
+        SetupMovePopulatesStore(job.SeriesInstanceUid, 2);
+        _correctorMock
+            .Setup(c => c.CorrectAsync(It.IsAny<List<DicomDataset>>(),
+                                       It.IsAny<IProgress<string>>(),
+                                       It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new DicomDataset()]);
+
+        await Build(onSendAttempt: _ => throw new OperationCanceledException())
+            .Invoking(s => s.RunAsync(job, CancellationToken.None))
+            .Should().NotThrowAsync();
+
+        var run = await ReadRunAsync(job.SeriesInstanceUid);
+        run!.Status.Should().Be("Cancelled");
+    }
+
+    // ── MonitorState ──────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task RunAsync_HappyPath_MonitorJobDescriptionContainsPatientId()
+    {
+        var job = MakeJob(patientId: "PAT777", expectedSlices: 2);
+        SetupMovePopulatesStore(job.SeriesInstanceUid, 2);
+        _correctorMock
+            .Setup(c => c.CorrectAsync(It.IsAny<List<DicomDataset>>(),
+                                       It.IsAny<IProgress<string>>(),
+                                       It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new DicomDataset()]);
+
+        await Build().RunAsync(job, CancellationToken.None);
+
+        _monitor.GetChannel("alice").CurrentJobDescription.Should().Contain("PAT777");
+    }
 }
 
 // ── Test subclass ─────────────────────────────────────────────────────────────
 
 /// <summary>
-/// Replaces the two network-bound virtual methods so tests never open a socket.
-///   SendToAriaAsync       → no-op (simulates successful ARIA upload)
+/// Replaces the network-bound virtual methods so tests never open a socket.
+///   SendAttemptAsync           → no-op by default, or delegates to onSendAttempt
 ///   WaitForStableDeliveryAsync → no-op when skipWait=true (tests the zero-slice guard)
+///   PollInterval / StableWindow / RetryDelay → shortened so timing-sensitive tests
+///                                              finish in milliseconds, not seconds
 /// </summary>
 file sealed class TestCorrectionService : CorrectionService
 {
     private readonly bool _skipWait;
+    private readonly Func<CancellationToken, Task>? _onSendAttempt;
 
     public TestCorrectionService(
         IDicomQueryService dicomQuery,
@@ -364,16 +572,24 @@ file sealed class TestCorrectionService : CorrectionService
         IOptions<DicomConfig> dicomCfg,
         IOptions<AppConfig> appCfg,
         ILogger<CorrectionService> logger,
-        bool skipWait = false)
+        bool skipWait = false,
+        Func<CancellationToken, Task>? onSendAttempt = null)
         : base(dicomQuery, store, corrector, dbFactory, monitorState, dicomCfg, appCfg, logger)
     {
         _skipWait = skipWait;
+        _onSendAttempt = onSendAttempt;
     }
 
-    protected override Task SendToAriaAsync(
+    // Fast intervals so timing-sensitive tests complete in <500 ms.
+    protected override TimeSpan PollInterval => TimeSpan.FromMilliseconds(50);
+    protected override TimeSpan StableWindow  => TimeSpan.FromMilliseconds(200);
+    protected override TimeSpan RetryDelay    => TimeSpan.Zero;
+
+    protected override Task SendAttemptAsync(
         List<DicomDataset> datasets,
         IProgress<string> progress,
-        CancellationToken ct) => Task.CompletedTask;
+        CancellationToken ct) =>
+        _onSendAttempt?.Invoke(ct) ?? Task.CompletedTask;
 
     protected override Task WaitForStableDeliveryAsync(
         string seriesUid,
