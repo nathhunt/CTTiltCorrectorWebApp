@@ -365,3 +365,7 @@ FodyWeavers.xsd
 *.db-shm
 *.db-wal
 /CTTiltCorrectorWebApp/appsettings.json
+
+# Claude Code
+.claude/settings.local.json
+.claude/memory/
