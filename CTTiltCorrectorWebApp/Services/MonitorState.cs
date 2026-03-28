@@ -50,7 +50,7 @@ public class UserMonitorChannel
         Notify();
     }
 
-    private void OnMessage(string message)
+    internal void OnMessage(string message)
     {
         lock (_lock)
         {
