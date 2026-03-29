@@ -5,12 +5,31 @@ using itk.simple;
 
 namespace CTTiltCorrector.Corrector;
 
+/// <summary>
+/// Default implementation of <see cref="ITiltCorrector"/> that corrects CT
+/// gantry tilt by resampling the volume into standard HFS axial orientation
+/// using SimpleITK.
+/// </summary>
+/// <remarks>
+/// Pipeline:
+/// <list type="number">
+///   <item>Load and sort slices via <see cref="DicomSeriesLoader"/>.</item>
+///   <item>Skip correction if the series already has identity IOP (1\0\0\0\1\0).</item>
+///   <item>Determine output slice spacing from the SliceThickness tag.</item>
+///   <item>Derive corrected PatientPosition (HFP input stays HFP; all others become HFS).</item>
+///   <item>Resample to identity orientation via <see cref="SimpleItkResampler"/>.</item>
+///   <item>Build output DICOM datasets via <see cref="DicomSeriesWriter"/>.</item>
+/// </list>
+/// To replace with a different algorithm, implement <see cref="ITiltCorrector"/>
+/// in a new class and register it in <c>Program.cs</c>.
+/// </remarks>
 public class TiltCorrector : ITiltCorrector
 {
     public TiltCorrector()
     {
     }
 
+    /// <inheritdoc/>
     public async Task<List<DicomDataset>> CorrectAsync(
     List<DicomDataset> slices,
     IProgress<string> progress,

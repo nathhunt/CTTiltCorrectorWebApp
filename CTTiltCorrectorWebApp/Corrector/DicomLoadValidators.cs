@@ -87,6 +87,14 @@ public class DicomLoadValidators
         }
     }
 
+    /// <summary>
+    /// Throws if any slice is missing the PatientPosition tag, if multiple
+    /// distinct values are found, or if the position is not HFS or FFS.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown with diagnostic details (slice SOPInstanceUIDs and found values)
+    /// when the series fails the check.
+    /// </exception>
     public static void AssertPatientPosition(List<SliceInfo> slices)
     {
         var missing = slices.Where(s => !s.Dataset.Contains(DicomTag.PatientPosition)).ToList();

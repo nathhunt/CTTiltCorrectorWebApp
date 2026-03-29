@@ -10,6 +10,19 @@ namespace CTTiltCorrector.Services;
 
 // ─── Job descriptor ───────────────────────────────────────────────────────────
 
+/// <summary>
+/// Immutable descriptor for a single tilt-correction job, created at
+/// submission time and passed through the queue to <see cref="CorrectionService"/>.
+/// </summary>
+/// <param name="PatientId">Patient MRN as returned by the ARIA C-FIND query.</param>
+/// <param name="StudyInstanceUid">DICOM StudyInstanceUID — required for the C-MOVE request.</param>
+/// <param name="SeriesInstanceUid">DICOM SeriesInstanceUID identifying the series to correct.</param>
+/// <param name="UserName">Windows domain username of the submitting user (e.g. <c>DOMAIN\jsmith</c>).</param>
+/// <param name="ExpectedSliceCount">
+///   Value of NumberOfSeriesRelatedInstances from the C-FIND response.
+///   Used by <see cref="CorrectionService.WaitForStableDeliveryAsync"/> to determine when
+///   delivery is complete. Pass 0 if the value was not available.
+/// </param>
 public record CorrectionJob(
     string PatientId,
     string StudyInstanceUid,
