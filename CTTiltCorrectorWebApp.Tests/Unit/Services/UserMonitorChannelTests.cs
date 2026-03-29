@@ -107,19 +107,20 @@ public class UserMonitorChannelTests
     }
 
     [Fact]
-    public async Task Lines_AtMaxCapacity_OldestLineDropped()
+    public void Lines_AtMaxCapacity_OldestLineDropped()
     {
+        // Call OnMessage directly (internal) to bypass Progress<T> thread-pool scheduling.
+        // Testing via Progress<T> is non-deterministic: VS and CLI test runners attach
+        // different SynchronizationContexts, so callbacks arrive in different orders and
+        // at different speeds — making "line 0" the evicted item unreliable.
         var channel = new UserMonitorChannel();
-        var progress = channel.CreateProgressReporter();
 
-        // Add 500 lines (the cap) plus one more
         for (int i = 0; i < 501; i++)
-            progress.Report($"line {i}");
+            channel.OnMessage($"line {i}");
 
-        await Task.Delay(200); // give the thread pool time to process all 501
-
-        channel.Lines.Count.Should().BeLessThanOrEqualTo(500);
-        channel.Lines.Should().NotContain("line 0"); // oldest should be dropped
+        channel.Lines.Should().HaveCount(500);
+        channel.Lines.Should().NotContain("line 0");   // first-in is the one evicted
+        channel.Lines.Should().Contain("line 500");    // last-in is always present
     }
 
     // ── Subscribe / Unsubscribe ───────────────────────────────────────────────

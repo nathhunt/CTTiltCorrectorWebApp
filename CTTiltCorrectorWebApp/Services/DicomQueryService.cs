@@ -8,11 +8,18 @@ namespace CTTiltCorrector.Services;
 
 // ─── DTOs ─────────────────────────────────────────────────────────────────────
 
+/// <summary>Patient demographics returned by a study-level C-FIND.</summary>
 public record DicomPatientResult(
     string PatientId,
     string PatientName,
     string PatientDob);
 
+/// <summary>
+/// Metadata for a single CT series returned by <see cref="IDicomQueryService.FindAsync"/>.
+/// <see cref="NumberOfImages"/> is the definitive image count obtained from an
+/// image-level C-FIND, not the potentially unreliable NumberOfSeriesRelatedInstances
+/// returned at series level by ARIA.
+/// </summary>
 public record DicomSeriesResult(
     string PatientId,
     string PatientName,
@@ -24,9 +31,46 @@ public record DicomSeriesResult(
     string SeriesDate,
     int NumberOfImages);
 
+// ─── Interface ────────────────────────────────────────────────────────────────
+
+/// <summary>
+/// DICOM query and retrieval operations against the configured ARIA server.
+/// </summary>
+public interface IDicomQueryService
+{
+    /// <summary>
+    /// Runs the full multi-tier C-FIND pipeline for the given patient and
+    /// returns only diagnostic CT series. See <see cref="DicomQueryService.FindAsync"/>
+    /// for the full filter chain.
+    /// </summary>
+    /// <param name="patientId">Patient MRN to search for.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>
+    ///   Patient demographics (or <see langword="null"/> if not found) and a
+    ///   filtered list of diagnostic CT series.
+    /// </returns>
+    Task<(DicomPatientResult? Patient, IReadOnlyList<DicomSeriesResult> Series)>
+        FindAsync(string patientId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Issues a C-MOVE request to ARIA, instructing it to push the specified
+    /// series to <c>Dicom:MoveDestinationAeTitle</c>.
+    /// Treats both Success and Warning final statuses as completion.
+    /// </summary>
+    /// <param name="studyInstanceUid">StudyInstanceUID containing the series.</param>
+    /// <param name="seriesInstanceUid">SeriesInstanceUID to retrieve.</param>
+    /// <param name="progress">Optional sink for in-progress status messages.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task MoveSeriesAsync(
+        string studyInstanceUid,
+        string seriesInstanceUid,
+        IProgress<string>? progress = null,
+        CancellationToken ct = default);
+}
+
 // ─── Service ─────────────────────────────────────────────────────────────────
 
-public class DicomQueryService
+public class DicomQueryService : IDicomQueryService
 {
     private readonly DicomConfig _cfg;
     private readonly ILogger<DicomQueryService> _logger;
@@ -409,7 +453,7 @@ public class DicomQueryService
     /// to avoid querying obviously non-diagnostic series.
     /// The image count check in the main pipeline is the definitive filter.
     /// </summary>
-    private static bool IsLikelyDiagnosticCt(DicomSeriesResult s)
+    internal static bool IsLikelyDiagnosticCt(DicomSeriesResult s)
     {
         var desc = s.SeriesDescription.ToUpperInvariant();
 

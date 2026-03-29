@@ -32,6 +32,30 @@ namespace DicomTiltCorrector
             _progress = progress;
         }
 
+        /// <summary>
+        /// Converts a resampled ITK volume into a list of DICOM datasets ready
+        /// for transmission via C-STORE — one dataset per Z slice.
+        /// </summary>
+        /// <remarks>
+        /// Per-slice steps:
+        /// <list type="number">
+        ///   <item>Extract 2-D plane from the 3-D ITK volume.</item>
+        ///   <item>Find the nearest reference slice by <see cref="DicomSeriesLoader.SliceInfo.SlicePosition"/>.</item>
+        ///   <item>Copy non-geometry tags from the reference via <see cref="DicomTagCopier.CopyNonGeometryTags"/>.</item>
+        ///   <item>Write geometry tags: identity IOP, corrected IPP, SliceThickness, PixelSpacing, etc.</item>
+        ///   <item>Assign new SeriesInstanceUID (shared) and SOPInstanceUID (per-slice).</item>
+        ///   <item>Apply inverse RescaleSlope/Intercept to recover stored pixel values, then write as DICOM OW.</item>
+        ///   <item>Populate file meta (TransferSyntax, MediaStorageSOPClassUID) without writing to disk.</item>
+        /// </list>
+        /// </remarks>
+        /// <param name="resampledVolume">
+        ///   Identity-direction volume from <see cref="SimpleItkResampler.Resample"/>.
+        ///   Spacing, origin, and size are read directly from the image.
+        /// </param>
+        /// <returns>
+        ///   One <see cref="DicomDataset"/> per Z slice, all sharing a new
+        ///   SeriesInstanceUID and carrying identity ImageOrientationPatient.
+        /// </returns>
         public List<DicomDataset> BuildDatasets(Image resampledVolume)
         {
             var results = new List<DicomDataset>();

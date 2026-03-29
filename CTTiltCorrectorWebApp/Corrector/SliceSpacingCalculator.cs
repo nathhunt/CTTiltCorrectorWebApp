@@ -22,6 +22,25 @@ namespace CTTiltCorrector.Corrector;
 /// </summary>
 public static class SliceSpacingCalculator
 {
+    /// <summary>
+    /// Returns the output slice spacing in mm for a sorted DICOM series.
+    /// </summary>
+    /// <remarks>
+    /// Resolution order:
+    /// <list type="number">
+    ///   <item><b>SliceThickness tag</b> — preferred; describes the intended reconstruction spacing
+    ///         that viewers and Eclipse expect as the inter-slice distance for display and MPR.</item>
+    ///   <item><b>Median IPP gap</b> — fallback when SliceThickness is absent or zero;
+    ///         robust against outlier gaps via <see cref="MedianPositionSpacing"/>.</item>
+    ///   <item><b>1.0 mm</b> — last-resort default for single-slice input.</item>
+    /// </list>
+    /// The IPP gap is intentionally <em>not</em> used as the primary source because many CT
+    /// series are acquired with overlapping thin slices but reconstructed at a coarser
+    /// SliceThickness — using the IPP gap would produce the wrong number of output slices.
+    /// </remarks>
+    /// <param name="slices">Sorted slices as returned by <see cref="DicomSeriesLoader.Load"/>.</param>
+    /// <param name="progress">Progress sink; receives a single informational message describing the chosen spacing.</param>
+    /// <returns>Output Z spacing in mm (always &gt; 0).</returns>
     public static double Compute(IReadOnlyList<DicomSeriesLoader.SliceInfo> slices, IProgress<string> progress)
     {
         if (slices == null) throw new ArgumentNullException(nameof(slices));

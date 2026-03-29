@@ -77,6 +77,10 @@ public class CorrectionJobQueue
 
 // ─── Job wrapper ─────────────────────────────────────────────────────────────
 
+/// <summary>
+/// Wraps a <see cref="CorrectionJob"/> with the cancellation token that was
+/// active when the job was submitted, allowing the user to cancel mid-flight.
+/// </summary>
 public record QueuedJob(
     CorrectionJob Job,
     CancellationToken CancellationToken);

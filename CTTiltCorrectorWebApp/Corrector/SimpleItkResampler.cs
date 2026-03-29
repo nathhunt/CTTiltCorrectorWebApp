@@ -4,8 +4,42 @@ using itk.simple;
 
 namespace CTTiltCorrector.Corrector;
 
+/// <summary>
+/// Converts a sorted list of tilted DICOM slices into a SimpleITK
+/// <see cref="Image"/> resampled to standard identity (LPS-aligned) orientation.
+/// </summary>
 public static class SimpleItkResampler
-{  
+{
+    /// <summary>
+    /// Builds an ITK image from the supplied slices and resamples it to an
+    /// axis-aligned (identity direction) grid.
+    /// </summary>
+    /// <remarks>
+    /// Steps:
+    /// <list type="number">
+    ///   <item>Read geometry (IPP, IOP, PixelSpacing) from DICOM tags of the first slice.</item>
+    ///   <item>Construct the ITK direction matrix from row/col direction cosines and tilt normal.</item>
+    ///   <item>Apply RescaleSlope/Intercept to produce an HU pixel buffer.</item>
+    ///   <item>Create an <c>sitkFloat64</c> ITK image from the buffer.</item>
+    ///   <item>Compute the axis-aligned bounding box via <see cref="VolumeGeometry.ComputeAxisAlignedBoundingBox"/>
+    ///         so no anatomy is clipped when tilt rotates corners outside the original XY footprint.</item>
+    ///   <item>Resample with <c>ResampleImageFilter</c> using identity direction, linear interpolation,
+    ///         and a background fill value equal to the corner voxel (typically ~−1024 HU).</item>
+    /// </list>
+    /// </remarks>
+    /// <param name="sortedSlices">
+    ///   Slices sorted by IPP-Z, as returned by <see cref="DicomSeriesLoader.Load"/>.
+    /// </param>
+    /// <param name="progress">Progress sink for status messages.</param>
+    /// <param name="forcedSliceSpacingMm">
+    ///   When non-zero, overrides the inter-slice spacing derived from the source
+    ///   geometry. Pass the value from <see cref="SliceSpacingCalculator.Compute"/>
+    ///   so the output spacing matches the SliceThickness tag.
+    /// </param>
+    /// <returns>
+    ///   A 3-D <c>sitkFloat64</c> ITK image in identity (HFS axial) orientation.
+    ///   Caller is responsible for calling <see cref="Image.Dispose"/>.
+    /// </returns>
     public static Image Resample(IReadOnlyList<DicomSeriesLoader.SliceInfo> sortedSlices,
                           IProgress<string> progress,
                           double forcedSliceSpacingMm = 0)
