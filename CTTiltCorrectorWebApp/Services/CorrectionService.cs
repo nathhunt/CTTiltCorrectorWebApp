@@ -69,7 +69,7 @@ public interface ITiltCorrector
 
 /// <summary>
 /// Orchestrates the full in-memory pipeline:
-///   C-MOVE  →  InMemoryDicomStore  →  ITiltCorrector  →  C-STORE SCU  →  ARIA
+///   C-MOVE  →  InMemoryDicomStore  →  ITiltCorrector  →  conflict check  →  C-STORE SCU  →  ARIA
 /// </summary>
 public class CorrectionService
 {
@@ -170,7 +170,11 @@ public class CorrectionService
             // Release the source slices; corrected set is all we need now
             slices.Clear();
 
-            // ── 6. Send corrected datasets back to ARIA via C-STORE SCU ───────
+            // ── 6. Ensure SeriesNumber and SeriesDescription are unique in ARIA ─
+            combinedLogger.Report("🔍  Checking ARIA for series number / description conflicts…");
+            await ResolveSeriesConflictsAsync(corrected, job.StudyInstanceUid, combinedLogger, ct);
+
+            // ── 7. Send corrected datasets back to ARIA via C-STORE SCU ───────
             combinedLogger.Report($"⬆️  Sending {corrected.Count} corrected slices to ARIA…");
             await SendToAriaAsync(corrected, combinedLogger, ct);
             combinedLogger.Report("✅  Upload to ARIA complete.");
@@ -274,7 +278,7 @@ public class CorrectionService
         ct.ThrowIfCancellationRequested();
     }
 
-    // ─── Step 6: send corrected datasets to ARIA ──────────────────────────────
+    // ─── Step 7: send corrected datasets to ARIA ──────────────────────────────
 
     private const int MaxUploadAttempts = 3;
 
@@ -379,6 +383,94 @@ public class CorrectionService
         }
 
         progress.Report($"  ✅ Upload complete — {total}/{total} slices accepted by ARIA.");
+    }
+
+    // ─── Step 6: resolve SeriesNumber / SeriesDescription conflicts ──────────
+
+    /// <summary>
+    /// Queries ARIA for all series currently in the study and, if the proposed
+    /// SeriesNumber or SeriesDescription already exists, increments until a free
+    /// value is found. All datasets are updated in place.
+    ///
+    /// If the ARIA query fails the method logs a warning and returns without
+    /// modifying anything — the upload still proceeds with the original values.
+    /// </summary>
+    /// <param name="datasets">
+    ///   Corrected datasets about to be sent to ARIA. All share the same
+    ///   SeriesNumber and SeriesDescription; both tags are updated on every
+    ///   element if a conflict is detected.
+    /// </param>
+    /// <param name="studyInstanceUid">
+    ///   StudyInstanceUID of the study that will receive the corrected series.
+    ///   Used to scope the series-level C-FIND to the correct study.
+    /// </param>
+    /// <param name="progress">Sink for status messages reported to the Monitor UI and log file.</param>
+    /// <param name="ct">Cancellation token.</param>
+    private async Task ResolveSeriesConflictsAsync(
+        List<DicomDataset> datasets,
+        string studyInstanceUid,
+        IProgress<string> progress,
+        CancellationToken ct)
+    {
+        if (datasets.Count == 0)
+            return;
+
+        var existing = await _dicomQuery.GetExistingSeriesMetadataAsync(studyInstanceUid, ct);
+
+        if (existing.Count == 0)
+        {
+            progress.Report("  No existing series found (or query failed) — skipping conflict check.");
+            return;
+        }
+
+        var existingNumbers      = existing.Select(x => x.SeriesNumber).ToHashSet();
+        var existingDescriptions = existing.Select(x => x.SeriesDescription)
+                                           .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var first = datasets[0];
+
+        // ── Resolve SeriesNumber ──────────────────────────────────────────────
+        int currentNumber  = first.GetSingleValueOrDefault(DicomTag.SeriesNumber, 0);
+        int resolvedNumber = currentNumber;
+        while (existingNumbers.Contains(resolvedNumber))
+            resolvedNumber++;
+
+        // ── Resolve SeriesDescription ─────────────────────────────────────────
+        string currentDesc  = first.GetSingleValueOrDefault(DicomTag.SeriesDescription, string.Empty);
+        string resolvedDesc = currentDesc;
+        if (existingDescriptions.Contains(resolvedDesc))
+        {
+            int counter = 2;
+            do
+            {
+                string disambig = $"({counter})";
+                resolvedDesc = currentDesc.Substring(
+                    0, Math.Min(currentDesc.Length, 64 - disambig.Length)) + disambig;
+                counter++;
+            }
+            while (existingDescriptions.Contains(resolvedDesc));
+        }
+
+        bool numberChanged = resolvedNumber != currentNumber;
+        bool descChanged   = !string.Equals(resolvedDesc, currentDesc, StringComparison.Ordinal);
+
+        if (!numberChanged && !descChanged)
+        {
+            progress.Report("  No conflicts found.");
+            return;
+        }
+
+        if (numberChanged)
+            progress.Report($"  SeriesNumber conflict resolved: {currentNumber} → {resolvedNumber}");
+        if (descChanged)
+            progress.Report($"  SeriesDescription conflict resolved: \"{currentDesc}\" → \"{resolvedDesc}\"");
+
+        string resolvedNumberStr = resolvedNumber.ToString();
+        foreach (var ds in datasets)
+        {
+            if (numberChanged) ds.AddOrUpdate(DicomTag.SeriesNumber, resolvedNumberStr);
+            if (descChanged)   ds.AddOrUpdate(DicomTag.SeriesDescription, resolvedDesc);
+        }
     }
 
     // ─── Helpers ──────────────────────────────────────────────────────────────
