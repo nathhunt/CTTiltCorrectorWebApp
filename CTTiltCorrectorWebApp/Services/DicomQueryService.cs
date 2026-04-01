@@ -66,6 +66,19 @@ public interface IDicomQueryService
         string seriesInstanceUid,
         IProgress<string>? progress = null,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns the SeriesNumber and SeriesDescription for every series currently
+    /// stored in ARIA for the given study. Used before sending a corrected series
+    /// back to ARIA to detect and resolve SeriesNumber / SeriesDescription conflicts.
+    /// Returns an empty list (rather than throwing) if the C-FIND fails, so the
+    /// caller can degrade gracefully.
+    /// </summary>
+    /// <param name="studyInstanceUid">StudyInstanceUID to query.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<IReadOnlyList<(int SeriesNumber, string SeriesDescription)>> GetExistingSeriesMetadataAsync(
+        string studyInstanceUid,
+        CancellationToken ct = default);
 }
 
 // ─── Service ─────────────────────────────────────────────────────────────────
@@ -463,6 +476,51 @@ public class DicomQueryService : IDicomQueryService
             return false;
 
         return true;
+    }
+
+    // ─── Series metadata for conflict detection ───────────────────────────────
+
+    public async Task<IReadOnlyList<(int SeriesNumber, string SeriesDescription)>> GetExistingSeriesMetadataAsync(
+        string studyInstanceUid,
+        CancellationToken ct = default)
+    {
+        var results = new List<(int, string)>();
+
+        var request = new DicomCFindRequest(DicomQueryRetrieveLevel.Series);
+        var ds = request.Dataset;
+        ds.AddOrUpdate(DicomTag.StudyInstanceUID, studyInstanceUid);
+        ds.AddOrUpdate(DicomTag.SeriesInstanceUID, string.Empty);
+        ds.AddOrUpdate(DicomTag.SeriesNumber, string.Empty);
+        ds.AddOrUpdate(DicomTag.SeriesDescription, string.Empty);
+
+        request.OnResponseReceived += (_, response) =>
+        {
+            if (response.Status == DicomStatus.Pending && response.Dataset is not null)
+            {
+                int seriesNumber = response.Dataset.GetSingleValueOrDefault(DicomTag.SeriesNumber, 0);
+                string description = response.Dataset.GetSingleValueOrDefault(DicomTag.SeriesDescription, string.Empty);
+                results.Add((seriesNumber, description));
+            }
+        };
+
+        var client = BuildClient();
+        await client.AddRequestAsync(request);
+
+        try
+        {
+            await client.SendAsync(ct);
+            _logger.LogInformation(
+                "Series metadata C-FIND for Study={Uid}: {Count} series found.", studyInstanceUid, results.Count);
+        }
+        catch (Exception ex)
+        {
+            // Non-fatal — caller degrades gracefully and proceeds without the check
+            _logger.LogWarning(ex,
+                "Series metadata C-FIND failed for Study={Uid} — proceeding without conflict check.", studyInstanceUid);
+            return Array.Empty<(int, string)>();
+        }
+
+        return results;
     }
 
     // ─── Client factory ───────────────────────────────────────────────────────
