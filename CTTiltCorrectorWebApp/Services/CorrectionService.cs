@@ -488,11 +488,17 @@ public class CorrectionService
     /// Wraps two progress sinks (UI + log file) into one combined reporter.
     /// </summary>
     private static IProgress<string> CombinedLogger(IProgress<string> ui, StreamWriter log)
-        => new Progress<string>(msg =>
+    {
+        var writeLock = new object();
+        return new Progress<string>(msg =>
         {
             var line = $"[{DateTime.Now:HH:mm:ss.fff}] {msg}";
+            lock (writeLock)
+            {
+                log.WriteLine(line);
+                log.Flush();
+            }
             ui.Report(line);
-            log.WriteLine(line);
-            log.Flush();
         });
+    }
 }
