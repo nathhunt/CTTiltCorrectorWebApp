@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using FellowOakDicom;
 using FellowOakDicom.Imaging;
 using itk.simple;
@@ -123,24 +124,11 @@ public static class SimpleItkResampler
 
         Image src = new Image((uint)nx, (uint)ny, (uint)nz, PixelIDValueEnum.sitkFloat64);
 
-        var options = new ParallelOptions { MaxDegreeOfParallelism = 6 };
-
-        // Copy buffer into ITK image
-        Parallel.For(0, nz, options, z =>
-        {
-            int sliceOffset = z * nx * ny;
-
-            for (int y = 0; y < ny; y++)
-            {
-                for (int x = 0; x < nx; x++)
-                {
-                    int i = y * nx + x;
-                    double value = volumeBuffer[sliceOffset + i];
-
-                    src.SetPixelAsDouble(new VectorUInt32(new uint[] { (uint)x, (uint)y, (uint)z }), value);
-                }
-            }
-        });
+        // Copy the entire buffer in one shot via the native buffer pointer,
+        // avoiding millions of per-voxel P/Invoke calls.
+        // ITK's native buffer is x-fastest, matching our volumeBuffer layout.
+        IntPtr bufferPtr = src.GetBufferAsDouble();
+        Marshal.Copy(volumeBuffer, 0, bufferPtr, volumeBuffer.Length);
 
         // Apply geometry
         src.SetSpacing(new VectorDouble(new double[] { sx, sy, sz }));
