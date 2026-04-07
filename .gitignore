@@ -372,6 +372,3 @@ FodyWeavers.xsd
 # Claude Code
 .claude/settings.local.json
 .claude/memory/
-
-# Github Actions
-*.yml
