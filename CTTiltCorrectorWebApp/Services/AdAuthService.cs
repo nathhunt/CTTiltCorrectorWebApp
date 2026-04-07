@@ -70,7 +70,9 @@ public class AdAuthService
                 ContextType.Domain,
                 _cfg.LdapServer,
                 null,
-                ContextOptions.Negotiate | ContextOptions.Signing | ContextOptions.Sealing);
+                ContextOptions.Negotiate | ContextOptions.Signing | ContextOptions.Sealing,
+                $"{_cfg.Domain}\\{username}",
+                password);
 
             if (!context.ValidateCredentials(username, password))
                 return (AuthResult.InvalidCredentials, null, groups);
