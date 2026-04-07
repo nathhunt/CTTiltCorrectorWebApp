@@ -81,8 +81,6 @@ public static class DicomSeriesLoader
         if (candidates.Count == 0)
             throw new InvalidOperationException("No valid DICOM slices in input.");
 
-        // Same validation calls as before — just update DicomLoadValidators
-        // to use SliceInfo.Dataset instead of SliceInfo.DicomFile.Dataset
         DicomLoadValidators.AssertSingleSeries(candidates);
         var (refRow, refCol) = DicomLoadValidators.AssertUniformIop(candidates);
         double[] normal = OrientationHelper.SliceNormal(refRow, refCol);

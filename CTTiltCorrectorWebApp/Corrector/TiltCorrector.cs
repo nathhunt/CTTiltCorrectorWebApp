@@ -7,7 +7,7 @@ namespace CTTiltCorrector.Corrector;
 
 /// <summary>
 /// Default implementation of <see cref="ITiltCorrector"/> that corrects CT
-/// gantry tilt by resampling the volume into standard HFS axial orientation
+/// gantry tilt by resampling the volume into identity axial orientation
 /// using SimpleITK.
 /// </summary>
 /// <remarks>
@@ -16,12 +16,10 @@ namespace CTTiltCorrector.Corrector;
 ///   <item>Load and sort slices via <see cref="DicomSeriesLoader"/>.</item>
 ///   <item>Skip correction if the series already has identity IOP (1\0\0\0\1\0).</item>
 ///   <item>Determine output slice spacing from the SliceThickness tag.</item>
-///   <item>Derive corrected PatientPosition (HFP input stays HFP; all others become HFS).</item>
+///   <item>Derive corrected PatientPosition (HFP/FFP input → HFP; all others → HFS).</item>
 ///   <item>Resample to identity orientation via <see cref="SimpleItkResampler"/>.</item>
 ///   <item>Build output DICOM datasets via <see cref="DicomSeriesWriter"/>.</item>
 /// </list>
-/// To replace with a different algorithm, implement <see cref="ITiltCorrector"/>
-/// in a new class and register it in <c>Program.cs</c>.
 /// </remarks>
 public class TiltCorrector : ITiltCorrector
 {
@@ -71,7 +69,6 @@ public class TiltCorrector : ITiltCorrector
             corrected = await Task.Run(() =>
             {
                 ct.ThrowIfCancellationRequested();
-                // This is where the heavy lifting and potential SimpleITK errors happen
                 return SimpleItkResampler.Resample(sortedSlices, progress, spacing);
             }, ct);
         }
@@ -86,10 +83,7 @@ public class TiltCorrector : ITiltCorrector
             var errorMessage = $"[ERROR] Resampling failed: {ex.Message}";
             progress.Report(errorMessage);
 
-            // Log the full stack trace for debugging at WRCC
             Console.WriteLine($"{errorMessage}\n{ex.StackTrace}");
-
-            // Rethrow or return null depending on how your UI handles failures
             throw new Exception(errorMessage, ex);
         }
 

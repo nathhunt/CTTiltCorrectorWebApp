@@ -24,7 +24,7 @@ public static class SimpleItkResampler
     ///   <item>Compute the axis-aligned bounding box via <see cref="VolumeGeometry.ComputeAxisAlignedBoundingBox"/>
     ///         so no anatomy is clipped when tilt rotates corners outside the original XY footprint.</item>
     ///   <item>Resample with <c>ResampleImageFilter</c> using identity direction, linear interpolation,
-    ///         and a background fill value equal to the corner voxel (typically ~−1024 HU).</item>
+    ///         and a background fill value of −1000 HU (air).</item>
     /// </list>
     /// </remarks>
     /// <param name="sortedSlices">
@@ -199,12 +199,11 @@ public static class SimpleItkResampler
         // ── 9. Resample ────────────────────────────────────────────────────
         //
         // Linear interpolation is used to avoid aliasing artefacts at the
-        // resampled voxel boundaries.  The default pixel value is set to the
-        // corner voxel of the source volume (typically air, ~ -1024 HU) so
-        // that regions outside the original FOV are filled with a clinically
-        // neutral background rather than zero (which would be water density).
+        // resampled voxel boundaries.  The default pixel value is set to
+        // -1000 HU (air) so that regions outside the original FOV are filled
+        // with a clinically neutral background rather than zero (water density).
 
-        double bgValue = src.GetPixelAsDouble(new VectorUInt32(new uint[] { 0, 0, 0 }));
+        const double bgValue = -1000.0;
 
         var resample = new ResampleImageFilter();
         resample.SetOutputDirection(identityDir);

@@ -76,9 +76,7 @@ builder.Services.AddSingleton<InMemoryDicomStore>();
 // ─── DICOM C-STORE SCP Listener (HostedService) ──────────────────────────────
 builder.Services.AddHostedService<DicomStoreScp>();
 
-// ─── Tilt corrector — swap YourTiltCorrector for your concrete implementation ─
-// Your class must implement ITiltCorrector:
-//   Task<List<DicomDataset>> CorrectAsync(List<DicomDataset>, IProgress<string>, CancellationToken)
+// ─── Tilt Corrector ──────────────────────────────────────────────────────────
 builder.Services.AddScoped<ITiltCorrector, TiltCorrector>();
 
 // ─── Application Services ────────────────────────────────────────────────────
