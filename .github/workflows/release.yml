@@ -1,20 +1,44 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag name (e.g. v1.2.3 or v1.2.3-beta.1)'
+        required: true
 
 jobs:
   release:
-    name: Publish & Release
+    name: Validate, Tag & Release
     runs-on: windows-latest
+    environment: Release
     permissions:
       contents: write
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PAT }}
+
+      - name: Validate tag format
+        shell: bash
+        run: |
+          if ! echo "${{ github.event.inputs.tag }}" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?$'; then
+            echo "Tag '${{ github.event.inputs.tag }}' does not meet version naming requirements (expected: v1.2.3, v1.2.3-beta or v1.2.3-beta.1)"
+            exit 1
+          fi
+
+      - name: Create and push tag
+        shell: bash
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git tag ${{ github.event.inputs.tag }}
+          git push origin ${{ github.event.inputs.tag }}
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -33,10 +57,12 @@ jobs:
           -o ./publish
 
       - name: Zip artifact
-        run: Compress-Archive -Path ./publish/* -DestinationPath CTTiltCorrectorWebApp-${{ github.ref_name }}-win-x64.zip
+        run: Compress-Archive -Path ./publish/* -DestinationPath CTTiltCorrectorWebApp-${{ github.event.inputs.tag }}-win-x64.zip
 
       - name: Upload artifact to release
         uses: softprops/action-gh-release@v2
         with:
-          files: CTTiltCorrectorWebApp-${{ github.ref_name }}-win-x64.zip
+          tag_name: ${{ github.event.inputs.tag }}
+          files: CTTiltCorrectorWebApp-${{ github.event.inputs.tag }}-win-x64.zip
           generate_release_notes: true
+          prerelease: ${{ contains(github.event.inputs.tag, '-') }}
