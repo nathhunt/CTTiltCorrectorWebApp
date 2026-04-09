@@ -39,3 +39,4 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: CTTiltCorrectorWebApp-${{ github.ref_name }}-win-x64.zip
+          generate_release_notes: true
