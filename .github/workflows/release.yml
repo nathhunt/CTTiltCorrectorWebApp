@@ -1,0 +1,40 @@
+name: Release
+
+on:
+  release:
+    types: [created]
+
+jobs:
+  release:
+    name: Publish & Release
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Publish
+        run: >
+          dotnet publish CTTiltCorrectorWebApp/CTTiltCorrectorWebApp.csproj
+          -c Release
+          -r win-x64
+          --self-contained true
+          -o ./publish
+
+      - name: Zip artifact
+        run: Compress-Archive -Path ./publish/* -DestinationPath CTTiltCorrectorWebApp-${{ github.ref_name }}-win-x64.zip
+
+      - name: Upload artifact to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: CTTiltCorrectorWebApp-${{ github.ref_name }}-win-x64.zip
